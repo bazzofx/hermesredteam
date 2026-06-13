@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morpheus — Red Team Command Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg: '#0a0c10',
+        surface: '#111318',
+        surface2: '#181b22',
+        border: '#1e2230',
+        red: '#d32f2f',
+        cyan: '#00acc1',
+        mint: '#00e676',
+        violet: '#7c4df0',
+        text: '#c8cdd8',
+        text2: '#7a8190',
+      }
+    }
+  }
+}
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+*{scrollbar-width:thin;scrollbar-color:#1e2230 #0a0c10}
+*::-webkit-scrollbar{width:6px;height:6px}
+*::-webkit-scrollbar-track{background:#0a0c10}
+*::-webkit-scrollbar-thumb{background:#1e2230;border-radius:3px}
+body{font-family:'Inter',sans-serif;background:#0a0c10;color:#c8cdd8}
+.mono{font-family:'JetBrains Mono',monospace}
+@keyframes pulse-mint{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}50%{box-shadow:0 0 0 6px rgba(0,230,118,0)}}
+.pulse-mint{animation:pulse-mint 2s infinite}
+@keyframes gradient-ring{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+.gradient-ring{background:linear-gradient(135deg,#7c4df0,#00acc1,#7c4df0);background-size:200% 200%;animation:gradient-ring 4s ease infinite}
+@keyframes skeleton{0%{opacity:.4}50%{opacity:.8}100%{opacity:.4}}
+.skeleton{animation:skeleton 1.5s ease-in-out infinite}
+.tab-active{border-bottom:2px solid #00acc1;color:#00acc1}
+.tab-inactive{border-bottom:2px solid transparent;color:#7a8190}
+.tab-inactive:hover{color:#c8cdd8}
+.modal-overlay{background:rgba(0,0,0,.7);backdrop-filter:blur(4px)}
+.drawer-overlay{background:rgba(0,0,0,.5);backdrop-filter:blur(2px)}
+.node-glow-online{box-shadow:0 0 12px rgba(0,230,118,.3)}
+.node-glow-busy{box-shadow:0 0 12px rgba(255,193,7,.3)}
+.node-glow-offline{box-shadow:0 0 12px rgba(211,47,47,.3)}
+input,select,textarea{background:#111318;border:1px solid #1e2230;color:#c8cdd8;outline:none;transition:border-color .2s}
+input:focus,select:focus,textarea:focus{border-color:#00acc1}
+.btn-primary{background:linear-gradient(135deg,#00acc1,#00838f);color:#fff;transition:all .2s}
+.btn-primary:hover{filter:brightness(1.15)}
+.btn-danger{background:rgba(211,47,47,.15);color:#d32f2f;border:1px solid rgba(211,47,47,.3);transition:all .2s}
+.btn-danger:hover{background:rgba(211,47,47,.25)}
+.btn-success{background:rgba(0,230,118,.12);color:#00e676;border:1px solid rgba(0,230,118,.3);transition:all .2s}
+.btn-success:hover{background:rgba(0,230,118,.22)}
+.btn-ghost{background:transparent;color:#7a8190;border:1px solid #1e2230;transition:all .2s}
+.btn-ghost:hover{color:#c8cdd8;border-color:#7a8190}
+.card{background:#111318;border:1px solid #1e2230;border-radius:8px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a8190;border-bottom:1px solid #1e2230}
+td{padding:10px 12px;border-bottom:1px solid rgba(30,34,48,.5);font-size:13px}
+tr:hover td{background:rgba(255,255,255,.015)}
+.progress-bar{height:4px;border-radius:2px;background:#1e2230;overflow:hidden}
+.progress-fill{height:100%;border-radius:2px;transition:width .5s ease}
+</style>
+</head>
+<body class="min-h-screen bg-bg text-text">
+
+<!-- NAV BAR -->
+<nav class="fixed top-0 left-0 right-0 z-50 h-14 bg-surface/95 backdrop-blur border-b border-border flex items-center justify-between px-4">
+  <div class="flex items-center gap-3 shrink-0">
+    <div class="relative w-8 h-8">
+      <div class="absolute inset-0 rounded-full gradient-ring"></div>
+      <div class="absolute inset-[3px] rounded-full bg-bg flex items-center justify-center">
+        <div class="w-2 h-2 rounded-full bg-mint pulse-mint"></div>
+      </div>
+    </div>
+    <div class="flex items-baseline gap-1">
+      <span class="font-semibold text-sm tracking-wide">Hermes</span>
+      <span class="text-text2 text-sm">/ Morpheus</span>
+      <span class="mono text-[10px] text-text2 px-1.5 py-0.5 rounded-[5px]" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)">v1.0</span>
+    </div>
+  </div>
+  <div class="flex items-center gap-1">
+    <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-active px-3 py-2 text-xs font-medium transition-colors">Assault Pipeline</button>
+    <button onclick="switchTab('health')" id="tab-health" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">System Health</button>
+    <button onclick="switchTab('subroutines')" id="tab-subroutines" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Subroutines</button>
+    <button onclick="switchTab('audit')" id="tab-audit" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Audit Logs</button>
+    <button onclick="switchTab('cve')" id="tab-cve" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">CVE Queue</button>
+    <button onclick="switchTab('morpheus')" id="tab-morpheus" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Morpheus</button>
+  </div>
+  <div class="flex items-center gap-3 shrink-0">
+    <div class="w-2 h-2 rounded-full bg-mint pulse-mint"></div>
+    <span class="text-xs text-text2 hidden sm:inline">All systems operational</span>
+    <span id="clock" class="mono text-xs text-text2">00:00:00 UTC</span>
+  </div>
+</nav>
+
+<main class="pt-14">
+
+<!-- TAB 1: ASSAULT PIPELINE -->
+<section id="view-pipeline" class="p-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-lg font-semibold">Assault Pipeline</h1>
+        <p class="text-xs text-text2 mt-1">6-agent red team orchestration flow</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="pipelineAction('start')" class="btn-primary px-4 py-2 rounded text-xs font-medium">Start</button>
+        <button onclick="pipelineAction('pause')" class="btn-ghost px-4 py-2 rounded text-xs font-medium">Pause</button>
+        <button onclick="pipelineAction('resume')" class="btn-ghost px-4 py-2 rounded text-xs font-medium">Resume</button>
+        <button onclick="pipelineAction('reset')" class="btn-danger px-4 py-2 rounded text-xs font-medium">Reset</button>
+      </div>
+    </div>
+    <div class="card p-6 mb-6" id="pipeline-flow">
+      <div class="flex items-center justify-between" id="pipeline-nodes"></div>
+    </div>
+    <div class="card p-5">
+      <h3 class="text-sm font-medium mb-3">Deploy Workload</h3>
+      <div class="flex gap-3">
+        <input id="redteam-target" type="text" placeholder="Enter target (domain, IP, or URL)" class="flex-1 rounded px-4 py-2.5 text-sm mono">
+        <button onclick="deployWorkload()" class="btn-primary px-6 py-2.5 rounded text-sm font-medium whitespace-nowrap">/redteam</button>
+      </div>
+      <div id="deploy-status" class="mt-3 text-xs hidden"></div>
+    </div>
+  </div>
+</section>
+
+<!-- TAB 2: SYSTEM HEALTH -->
+<section id="view-health" class="p-6 hidden">
+  <div class="max-w-6xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold">System Health</h1>
+      <p class="text-xs text-text2 mt-1">Real-time agent diagnostics</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="health-grid"></div>
+  </div>
+</section>
+
+<!-- TAB 3: SUBROUTINES -->
+<section id="view-subroutines" class="p-6 hidden">
+  <div class="max-w-6xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold">Subroutines</h1>
+      <p class="text-xs text-text2 mt-1">Active task queue per agent</p>
+    </div>
+    <div class="card p-5 mb-6">
+      <h3 class="text-sm font-medium mb-4">Subroutine Injector</h3>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <select id="inject-agent" class="rounded px-3 py-2.5 text-sm">
+          <option value="">Select Agent</option>
+          <option value="Recon">Recon</option>
+          <option value="Researcher">Researcher</option>
+          <option value="Breach">Breach</option>
+          <option value="Pivot">Pivot</option>
+          <option value="Logbook">Logbook</option>
+          <option value="ReportWriter">ReportWriter</option>
+        </select>
+        <input id="inject-task" type="text" placeholder="Task description" class="md:col-span-2 rounded px-3 py-2.5 text-sm">
+        <div class="flex gap-2">
+          <select id="inject-priority" class="rounded px-3 py-2.5 text-sm flex-1">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+          <button onclick="injectSubroutine()" class="btn-primary px-5 py-2.5 rounded text-sm font-medium whitespace-nowrap">Inject</button>
+        </div>
+      </div>
+    </div>
+    <div class="card overflow-hidden">
+      <table>
+        <thead><tr><th>Agent</th><th>Task</th><th>Progress</th><th>Priority</th><th class="text-right">Actions</th></tr></thead>
+        <tbody id="subroutine-body"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- TAB 4: AUDIT LOGS -->
+<section id="view-audit" class="p-6 hidden">
+  <div class="max-w-6xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold">Audit Logs</h1>
+      <p class="text-xs text-text2 mt-1">Immutable event trail with cryptographic verification</p>
+    </div>
+    <div class="card p-4 mb-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex gap-1">
+          <button onclick="setAuditDate('24h')" class="date-filter btn-ghost px-3 py-1.5 rounded text-xs" data-range="24h">24h</button>
+          <button onclick="setAuditDate('7d')" class="date-filter btn-ghost px-3 py-1.5 rounded text-xs" data-range="7d">7d</button>
+          <button onclick="setAuditDate('30d')" class="date-filter btn-ghost px-3 py-1.5 rounded text-xs" data-range="30d">30d</button>
+          <button onclick="setAuditDate('all')" class="date-filter btn-ghost px-3 py-1.5 rounded text-xs" data-range="all">All</button>
+        </div>
+        <select id="audit-agent-filter" onchange="filterAudit()" class="rounded px-3 py-1.5 text-xs">
+          <option value="">All Agents</option>
+          <option value="Recon">Recon</option><option value="Researcher">Researcher</option><option value="Breach">Breach</option>
+          <option value="Pivot">Pivot</option><option value="Logbook">Logbook</option><option value="ReportWriter">ReportWriter</option>
+        </select>
+        <select id="audit-severity-filter" onchange="filterAudit()" class="rounded px-3 py-1.5 text-xs">
+          <option value="">All Severities</option><option value="critical">Critical</option><option value="high">High</option>
+          <option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option>
+        </select>
+      </div>
+    </div>
+    <div class="card overflow-hidden">
+      <table>
+        <thead><tr><th>Timestamp</th><th>Agent</th><th>Action</th><th>Severity</th><th>Checkpoint ID</th></tr></thead>
+        <tbody id="audit-body"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- TAB 5: CVE QUEUE & REPORTS -->
+<section id="view-cve" class="p-6 hidden">
+  <div class="max-w-6xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold">CVE Queue & Reports</h1>
+      <p class="text-xs text-text2 mt-1">Vulnerability intelligence and on-demand research</p>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div>
+        <h2 class="text-sm font-medium mb-3 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-cyan"></span>CVE Intelligence Queue</h2>
+        <div class="card overflow-hidden">
+          <table>
+            <thead><tr><th>CVE ID</th><th>Subsystem</th><th>Added</th><th>CVSS</th><th class="text-right">Actions</th></tr></thead>
+            <tbody id="cve-queue-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h2 class="text-sm font-medium mb-3 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-violet"></span>On-Demand CVE Report</h2>
+        <div class="card p-5">
+          <div class="flex gap-3 mb-4">
+            <input id="cve-report-input" type="text" placeholder="CVE-2024-12345 or Apache Log4j 2.14.1" class="flex-1 rounded px-3 py-2.5 text-sm mono">
+            <button onclick="researchCVE()" class="btn-primary px-5 py-2.5 rounded text-sm font-medium whitespace-nowrap">Research</button>
+          </div>
+          <div id="cve-report-result" class="hidden"></div>
+          <div id="cve-report-loading" class="hidden">
+            <div class="skeleton h-4 w-3/4 rounded mb-3"></div>
+            <div class="skeleton h-4 w-1/2 rounded mb-3"></div>
+            <div class="skeleton h-4 w-2/3 rounded mb-3"></div>
+            <div class="skeleton h-4 w-1/3 rounded"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TAB 6: MORPHEUS -->
+<section id="view-morpheus" class="p-6 hidden">
+  <div class="max-w-4xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold">Morpheus</h1>
+      <p class="text-xs text-text2 mt-1">Command & control interface</p>
+    </div>
+    <div class="card p-4 mb-4">
+      <div class="text-xs text-text2 mb-2">Quick Commands</div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="fillCommand('/status')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/status</button>
+        <button onclick="fillCommand('/pause')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/pause</button>
+        <button onclick="fillCommand('/resume')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/resume</button>
+        <button onclick="fillCommand('/logbook summary')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/logbook summary</button>
+        <button onclick="fillCommand('/cve check ')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/cve check</button>
+        <button onclick="fillCommand('/cve report ')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/cve report</button>
+        <button onclick="fillCommand('/cve quick ')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/cve quick</button>
+        <button onclick="fillCommand('/redteam ')" class="btn-ghost px-3 py-1.5 rounded text-xs mono">/redteam</button>
+      </div>
+    </div>
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3">
+        <span class="text-cyan mono text-sm py-2.5">&gt;</span>
+        <input id="morpheus-input" type="text" placeholder="Enter command..." class="flex-1 bg-transparent border-0 text-sm mono py-2.5 focus:ring-0" onkeydown="if(event.key==='Enter')executeMorpheus()">
+        <button onclick="executeMorpheus()" class="btn-primary px-5 py-2.5 rounded text-sm font-medium">Execute</button>
+      </div>
+    </div>
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-xs text-text2">Response</span>
+        <button onclick="clearMorpheusLog()" class="text-xs text-text2 hover:text-text transition-colors">Clear</button>
+      </div>
+      <div id="morpheus-log" class="mono text-xs space-y-2 max-h-96 overflow-y-auto"><div class="text-text2 italic">Awaiting command...</div></div>
+    </div>
+    <div class="card p-5 mt-4">
+      <div class="text-xs text-text2 mb-3">Command History</div>
+      <div id="morpheus-history" class="mono text-xs space-y-1 max-h-48 overflow-y-auto"><div class="text-text2 italic">No commands executed yet.</div></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- NODE DOSIER MODAL -->
+<div id="node-modal" class="fixed inset-0 z-[100] hidden modal-overlay flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg max-h-[80vh] overflow-y-auto">
+    <div class="flex items-center justify-between p-5 border-b border-border">
+      <h3 id="node-modal-title" class="text-sm font-semibold">Agent Dossier</h3>
+      <button onclick="closeNodeModal()" class="text-text2 hover:text-text text-lg">&times;</button>
+    </div>
+    <div id="node-modal-body" class="p-5"></div>
+  </div>
+</div>
+
+<!-- HEALTH DIAGNOSTIC DRAWER -->
+<div id="health-drawer" class="fixed inset-0 z-[100] hidden drawer-overlay" onclick="if(event.target===this)closeHealthDrawer()">
+  <div class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-surface border-l border-border overflow-y-auto">
+    <div class="flex items-center justify-between p-5 border-b border-border">
+      <h3 id="health-drawer-title" class="text-sm font-semibold">Agent Diagnostics</h3>
+      <button onclick="closeHealthDrawer()" class="text-text2 hover:text-text text-lg">&times;</button>
+    </div>
+    <div id="health-drawer-body" class="p-5"></div>
+  </div>
+</div>
+
+<!-- AUDIT DETAIL DRAWER -->
+<div id="audit-drawer" class="fixed inset-0 z-[100] hidden drawer-overlay" onclick="if(event.target===this)closeAuditDrawer()">
+  <div class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-surface border-l border-border overflow-y-auto">
+    <div class="flex items-center justify-between p-5 border-b border-border">
+      <h3 class="text-sm font-semibold">Event Details</h3>
+      <button onclick="closeAuditDrawer()" class="text-text2 hover:text-text text-lg">&times;</button>
+    </div>
+    <div id="audit-drawer-body" class="p-5"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════ CONFIG ═══════════
+const API_BASE = '';
+const WS_URL = '';
+
+// ═══════════ STATE ══════════=
+let currentTab = 'pipeline';
+let pipelineStatus = 'idle';
+let agents = [
+  { id:'recon', name:'Recon', icon:'◎', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
+  { id:'researcher', name:'Researcher', icon:'◉', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
+  { id:'breach', name:'Breach', icon:'◆', status:'offline', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
+  { id:'pivot', name:'Pivot', icon:'◇', status:'offline', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
+  { id:'logbook', name:'Logbook', icon:'▣', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
+  { id:'reportwriter', name:'ReportWriter', icon:'◈', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' }
+];
+
+let subroutines = [];
+let auditLogs = [];
+let cveQueue = [];
+let morpheusHistory = [];
+
+// ═══════════ CLOCK ═══════════
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toISOString().replace('T',' ').substring(11,19) + ' UTC';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════ TAB SWITCHING ═══════════
+function switchTab(tab) {
+  currentTab = tab;
+  const tabs = ['pipeline','health','subroutines','audit','cve','morpheus'];
+  tabs.forEach(t => {
+    document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById('tab-' + t);
+    if(t === tab){ btn.classList.remove('tab-inactive'); btn.classList.add('tab-active'); }
+    else { btn.classList.remove('tab-active'); btn.classList.add('tab-inactive'); }
+  });
+  if(tab === 'health') renderHealth();
+  if(tab === 'subroutines') renderSubroutines();
+  if(tab === 'audit') renderAudit();
+  if(tab === 'cve') renderCVEQueue();
+}
+
+// ═══════════ API HELPERS ═══════════
+async function apiGet(path) {
+  if(!API_BASE) return null;
+  try { const r = await fetch(API_BASE + path); return await r.json(); } catch(e){ return null; }
+}
+async function apiPost(path, body) {
+  if(!API_BASE) return null;
+  try { const r = await fetch(API_BASE + path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); return await r.json(); } catch(e){ return null; }
+}
+async function apiDelete(path) {
+  if(!API_BASE) return null;
+  try { await fetch(API_BASE + path, {method:'DELETE'}); return true; } catch(e){ return null; }
+}
+
+// ═══════════ WEBSOCKET PLACEHOLDER ═══════════
+function initWebSocket() {
+  if(!WS_URL) return;
+  try {
+    const ws = new WebSocket(WS_URL);
+    ws.onmessage = (evt) => {
+      try { const data = JSON.parse(evt.data); handleWSMessage(data); } catch(e){}
+    };
+    ws.onclose = () => setTimeout(initWebSocket, 5000);
+  } catch(e){}
+}
+function handleWSMessage(data) {
+  if(data.type === 'agent_status') updateAgentStatus(data.agent, data.status);
+  if(data.type === 'audit_log') auditLogs.unshift(data.log);
+  if(data.type === 'subroutine_update') updateSubroutine(data.subroutine);
+}
+
+// ═══════════ TAB 1: ASSAULT PIPELINE ═══════════
+function getStatusColor(s) {
+  if(s==='online') return '#00e676';
+  if(s==='busy') return '#ffc107';
+  return '#d32f2f';
+}
+function getStatusGlow(s) {
+  if(s==='online') return 'node-glow-online';
+  if(s==='busy') return 'node-glow-busy';
+  return 'node-glow-offline';
+}
+function renderPipeline() {
+  const container = document.getElementById('pipeline-nodes');
+  let html = '';
+  agents.forEach((a, i) => {
+    const c = getStatusColor(a.status);
+    html += `<div class="flex flex-col items-center gap-2 cursor-pointer group" onclick="openNodeDossier('${a.id}')">
+      <div class="w-14 h-14 rounded-full border-2 flex items-center justify-center text-lg font-bold ${getStatusGlow(a.status)} transition-all group-hover:scale-110" style="border-color:${c};color:${c}">${a.icon}</div>
+      <span class="text-xs font-medium" style="color:${c}">${a.name}</span>
+      <span class="text-[10px] text-text2 capitalize">${a.status}</span>
+    </div>`;
+    if(i < agents.length - 1) {
+      html += `<div class="flex-1 flex items-center justify-center"><div class="w-full h-[2px] bg-gradient-to-r from-border to-border relative"><div class="absolute -top-[3px] right-0 w-0 h-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-l-[6px] border-l-border"></div></div></div>`;
+    }
+  });
+  container.innerHTML = html;
+}
+
+function openNodeDossier(agentId) {
+  const agent = agents.find(a=>a.id===agentId);
+  if(!agent) return;
+  document.getElementById('node-modal-title').textContent = agent.name + ' — Threat Dossier';
+  const c = getStatusColor(agent.status);
+  document.getElementById('node-modal-body').innerHTML = `
+    <div class="space-y-4">
+      <div class="flex items-center gap-4">
+        <div class="w-16 h-16 rounded-full border-2 flex items-center justify-center text-2xl font-bold" style="border-color:${c};color:${c}">${agent.icon}</div>
+        <div>
+          <div class="font-semibold text-base">${agent.name}</div>
+          <div class="text-xs capitalize" style="color:${c}">${agent.status}</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-surface2 rounded p-3">
+          <div class="text-[10px] text-text2 uppercase tracking-wider mb-1">CPU Usage</div>
+          <div class="mono text-sm font-medium">${agent.cpu}%</div>
+          <div class="progress-bar mt-2"><div class="progress-fill" style="width:${agent.cpu}%;background:${agent.cpu>80?'#d32f2f':agent.cpu>50?'#ffc107':'#00acc1'}"></div></div>
+        </div>
+        <div class="bg-surface2 rounded p-3">
+          <div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Memory</div>
+          <div class="mono text-sm font-medium">${agent.mem}%</div>
+          <div class="progress-bar mt-2"><div class="progress-fill" style="width:${agent.mem}%;background:${agent.mem>80?'#d32f2f':agent.mem>50?'#ffc107':'#00acc1'}"></div></div>
+        </div>
+        <div class="bg-surface2 rounded p-3">
+          <div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Uptime</div>
+          <div class="mono text-sm font-medium">${agent.uptime}</div>
+        </div>
+        <div class="bg-surface2 rounded p-3">
+          <div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Last Heartbeat</div>
+          <div class="mono text-sm font-medium">${agent.lastHeartbeat}</div>
+        </div>
+      </div>
+      <div class="bg-surface2 rounded p-3">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-2">Live Telemetry</div>
+        <div class="skeleton h-3 w-full rounded mb-2"></div>
+        <div class="skeleton h-3 w-4/5 rounded mb-2"></div>
+        <div class="skeleton h-3 w-3/5 rounded"></div>
+        <div class="text-[10px] text-text2 mt-2 italic">Awaiting real-time data from API...</div>
+      </div>
+    </div>`;
+  document.getElementById('node-modal').classList.remove('hidden');
+}
+function closeNodeModal(){ document.getElementById('node-modal').classList.add('hidden'); }
+
+function pipelineAction(action) {
+  pipelineStatus = action;
+  const statusMap = { start:'busy', pause:'offline', resume:'busy', reset:'online' };
+  const s = statusMap[action] || 'online';
+  if(action === 'reset') agents.forEach(a=>a.status='online');
+  else if(action === 'start') agents.forEach(a=>a.status = a.id==='recon'?'busy':'online');
+  else if(action === 'pause') agents.forEach(a=>a.status='offline');
+  else if(action === 'resume') agents.forEach(a=>a.status='online');
+  renderPipeline();
+  if(API_BASE) apiPost('/pipeline/' + action, {});
+}
+
+function deployWorkload() {
+  const target = document.getElementById('redteam-target').value.trim();
+  const status = document.getElementById('deploy-status');
+  if(!target){ status.textContent='Please enter a target.'; status.classList.remove('hidden'); status.className='mt-3 text-xs text-red'; return; }
+  status.textContent = 'Deploying workload to ' + target + '...'; status.classList.remove('hidden'); status.className='mt-3 text-xs text-cyan';
+  if(API_BASE){ apiPost('/redteam', {target}).then(r=>{ if(r) status.textContent='Workload deployed. Pipeline initiated.'; }); }
+  else { setTimeout(()=>{ status.textContent='[Demo] Pipeline initiated for ' + target; }, 1500); }
+}
+
+// ═══════════ TAB 2: SYSTEM HEALTH ═══════════
+function renderHealth() {
+  const grid = document.getElementById('health-grid');
+  grid.innerHTML = agents.map(a => {
+    const c = getStatusColor(a.status);
+    return `<div class="card p-5 cursor-pointer hover:border-opacity-50 transition-all" onclick="openHealthDrawer('${a.id}')" style="border-color:${a.status==='online'?'rgba(0,230,118,0.2)':a.status==='busy'?'rgba(255,193,7,0.2)':'rgba(211,47,47,0.2)'}">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full border flex items-center justify-center text-base font-bold" style="border-color:${c};color:${c}">${a.icon}</div>
+          <div><div class="text-sm font-medium">${a.name}</div><div class="text-[10px] capitalize" style="color:${c}">${a.status}</div></div>
+        </div>
+        <div class="w-2 h-2 rounded-full pulse-mint" style="background:${c}"></div>
+      </div>
+      <div class="space-y-3">
+        <div><div class="flex justify-between text-[10px] text-text2 mb-1"><span>CPU</span><span class="mono">${a.cpu}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${a.cpu}%;background:${a.cpu>80?'#d32f2f':a.cpu>50?'#ffc107':'#00acc1'}"></div></div></div>
+        <div><div class="flex justify-between text-[10px] text-text2 mb-1"><span>Memory</span><span class="mono">${a.mem}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${a.mem}%;background:${a.mem>80?'#d32f2f':a.mem>50?'#ffc107':'#00acc1'}"></div></div></div>
+        <div class="flex justify-between text-[10px]"><span class="text-text2">Uptime</span><span class="mono text-text">${a.uptime}</span></div>
+        <div class="flex justify-between text-[10px]"><span class="text-text2">Heartbeat</span><span class="mono text-text">${a.lastHeartbeat}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openHealthDrawer(agentId) {
+  const agent = agents.find(a=>a.id===agentId);
+  if(!agent) return;
+  document.getElementById('health-drawer-title').textContent = agent.name + ' — Diagnostics';
+  document.getElementById('health-drawer-body').innerHTML = `
+    <div class="space-y-5">
+      <div class="bg-surface2 rounded p-4">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-3">Status Control</div>
+        <div class="flex gap-2">
+          <button onclick="setAgentStatus('${agent.id}','online')" class="flex-1 btn-success px-3 py-2 rounded text-xs font-medium">Online</button>
+          <button onclick="setAgentStatus('${agent.id}','busy')" class="flex-1 btn-ghost px-3 py-2 rounded text-xs font-medium" style="color:#ffc107;border-color:rgba(255,193,7,.3)">Busy</button>
+          <button onclick="setAgentStatus('${agent.id}','offline')" class="flex-1 btn-danger px-3 py-2 rounded text-xs font-medium">Offline</button>
+        </div>
+      </div>
+      <div class="bg-surface2 rounded p-4">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-3">Container</div>
+        <button onclick="rebootAgent('${agent.id}')" class="btn-danger w-full px-4 py-2.5 rounded text-xs font-medium">Reboot Container</button>
+      </div>
+      <div class="bg-surface2 rounded p-4">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-3">Live Metrics</div>
+        <div class="skeleton h-3 w-full rounded mb-2"></div>
+        <div class="skeleton h-3 w-4/5 rounded mb-2"></div>
+        <div class="skeleton h-3 w-3/5 rounded mb-2"></div>
+        <div class="skeleton h-3 w-2/3 rounded"></div>
+        <div class="text-[10px] text-text2 mt-2 italic">Awaiting data from /api/agents/${agent.id}/metrics...</div>
+      </div>
+    </div>`;
+  document.getElementById('health-drawer').classList.remove('hidden');
+}
+function closeHealthDrawer(){ document.getElementById('health-drawer').classList.add('hidden'); }
+function setAgentStatus(id, status) {
+  const a = agents.find(x=>x.id===id);
+  if(a) { a.status=status; renderHealth(); }
+  if(API_BASE) apiPost('/agents/'+id+'/status',{status});
+}
+function rebootAgent(id) {
+  if(API_BASE) apiPost('/agents/'+id+'/reboot',{});
+  closeHealthDrawer();
+}
+
+// ═══════════ TAB 3: SUBROUTINES ═══════════
+function renderSubroutines() {
+  const tbody = document.getElementById('subroutine-body');
+  if(subroutines.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-text2 italic text-xs">No active subroutines. Inject one above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = subroutines.map((s,i) => {
+    const pc = s.priority==='critical'?'background:rgba(211,47,47,.15);color:#d32f2f':s.priority==='high'?'background:rgba(255,109,0,.15);color:#ff6d00':s.priority==='medium'?'background:rgba(255,193,7,.15);color:#ffc107':'background:rgba(0,172,193,.15);color:#00acc1';
+    return `<tr>
+      <td class="font-medium text-xs">${s.agent}</td>
+      <td class="text-xs text-text2">${s.task}</td>
+      <td><div class="flex items-center gap-2"><div class="progress-bar flex-1"><div class="progress-fill" style="width:${s.progress}%;background:#00acc1"></div></div><span class="mono text-[10px] w-8 text-right">${s.step}/${s.totalSteps}</span></div></td>
+      <td><span class="text-[10px] px-2 py-0.5 rounded-full capitalize" style="${pc}">${s.priority}</span></td>
+      <td class="text-right"><button onclick="completeSubroutine(${i})" class="btn-success px-2 py-1 rounded text-[10px] mr-1">Complete</button><button onclick="terminateSubroutine(${i})" class="btn-danger px-2 py-1 rounded text-[10px]">Kill</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function injectSubroutine() {
+  const agent = document.getElementById('inject-agent').value;
+  const task = document.getElementById('inject-task').value.trim();
+  const priority = document.getElementById('inject-priority').value;
+  if(!agent || !task) return;
+  const sub = { agent, task, priority, progress:0, step:0, totalSteps: Math.floor(Math.random()*8)+3 };
+  subroutines.push(sub);
+  document.getElementById('inject-agent').value='';
+  document.getElementById('inject-task').value='';
+  renderSubroutines();
+  if(API_BASE) apiPost('/subroutines', sub);
+}
+
+function completeSubroutine(i) {
+  subroutines.splice(i,1);
+  renderSubroutines();
+}
+function terminateSubroutine(i) {
+  subroutines.splice(i,1);
+  renderSubroutines();
+}
+
+// ═══════════ TAB 4: AUDIT LOGS ═══════════
+function renderAudit() {
+  const tbody = document.getElementById('audit-body');
+  const agentF = document.getElementById('audit-agent-filter').value;
+  const sevF = document.getElementById('audit-severity-filter').value;
+  let logs = auditLogs;
+  if(agentF) logs = logs.filter(l=>l.agent===agentF);
+  if(sevF) logs = logs.filter(l=>l.severity===sevF);
+  if(logs.length===0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-text2 italic text-xs">No audit logs. Awaiting data from /api/audit-logs...</td></tr>';
+    return;
+  }
+  tbody.innerHTML = logs.map((l,i) => {
+    const sc = l.severity==='critical'?'color:#d32f2f':l.severity==='high'?'color:#ff6d00':l.severity==='medium'?'color:#ffc107':l.severity==='low'?'color:#00acc1':'color:#7a8190';
+    return `<tr class="cursor-pointer" onclick="openAuditDrawer(${i})">
+      <td class="mono text-[11px]">${l.timestamp}</td>
+      <td class="text-xs font-medium">${l.agent}</td>
+      <td class="text-xs text-text2">${l.action}</td>
+      <td class="text-xs capitalize font-medium" style="${sc}">${l.severity}</td>
+      <td class="mono text-[10px] text-text2">${l.checkpointId}</td>
+    </tr>`;
+  }).join('');
+}
+
+function setAuditDate(range) {
+  document.querySelectorAll('.date-filter').forEach(b=>{
+    if(b.dataset.range===range){ b.classList.remove('btn-ghost'); b.classList.add('btn-primary'); }
+    else { b.classList.remove('btn-primary'); b.classList.add('btn-ghost'); }
+  });
+  if(API_BASE) apiGet('/audit-logs?range='+range).then(r=>{ if(r){ auditLogs=r.logs||[]; renderAudit(); } });
+}
+
+function filterAudit(){ renderAudit(); }
+
+function openAuditDrawer(idx) {
+  const log = auditLogs[idx];
+  if(!log) return;
+  document.getElementById('audit-drawer-body').innerHTML = `
+    <div class="space-y-4">
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Timestamp</div><div class="mono text-xs">${log.timestamp}</div></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Agent</div><div class="text-sm font-medium">${log.agent}</div></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Action</div><div class="text-sm">${log.action}</div></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Severity</div><div class="text-sm capitalize">${log.severity}</div></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Checkpoint ID</div><div class="mono text-xs break-all">${log.checkpointId}</div></div>
+      <div class="bg-surface2 rounded p-3">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-2">SHA-256 Hash</div>
+        <div class="mono text-[10px] break-all text-cyan">${log.sha256||'Awaiting from API...'}</div>
+      </div>
+      <div class="bg-surface2 rounded p-3">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-2">JWT Token</div>
+        <div class="mono text-[10px] break-all text-violet">${log.jwt||'Awaiting from API...'}</div>
+      </div>
+      <div class="bg-surface2 rounded p-3">
+        <div class="text-[10px] text-text2 uppercase tracking-wider mb-2">Hex Buffer Preview</div>
+        <div class="mono text-[10px] break-all text-mint">${log.hexBuffer||'Awaiting from API...'}</div>
+      </div>
+    </div>`;
+  document.getElementById('audit-drawer').classList.remove('hidden');
+}
+function closeAuditDrawer(){ document.getElementById('audit-drawer').classList.add('hidden'); }
+
+// ═══════════ TAB 5: CVE QUEUE & REPORTS ═══════════
+function renderCVEQueue() {
+  const tbody = document.getElementById('cve-queue-body');
+  if(cveQueue.length===0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-text2 italic text-xs">CVE queue empty. Awaiting data from /api/cve-queue...</td></tr>';
+    return;
+  }
+  tbody.innerHTML = cveQueue.map((c,i) => {
+    const cc = c.cvss>=9?'color:#d32f2f;font-weight:700':c.cvss>=7?'color:#ff6d00;font-weight:600':c.cvss>=4?'color:#ffc107':'color:#00acc1';
+    const pc = c.pocStatus==='available'?'color:#00e676':c.pocStatus==='in-progress'?'color:#ffc107':'color:#7a8190';
+    return `<tr>
+      <td class="mono text-xs font-medium text-cyan">${c.id}</td>
+      <td class="text-xs text-text2">${c.subsystem}</td>
+      <td class="text-xs text-text2">${c.dateAdded}</td>
+      <td class="mono text-xs" style="${cc}">${c.cvss}</td>
+      <td class="text-right">
+        <button onclick="sendToBreach(${i})" class="btn-primary px-2 py-1 rounded text-[10px] mr-1">Send to Breach</button>
+        <button onclick="deleteCVE(${i})" class="btn-danger px-2 py-1 rounded text-[10px]">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function sendToBreach(idx) {
+  const cve = cveQueue[idx];
+  if(!cve) return;
+  if(API_BASE){ apiPost('/agents/breach/dispatch',{cveId:cve.id}); apiPost('/logbook/entry',{action:'CVE dispatched to Breach',cveId:cve.id}); }
+}
+
+function deleteCVE(idx) {
+  const cve = cveQueue[idx];
+  cveQueue.splice(idx,1);
+  renderCVEQueue();
+  if(API_BASE) apiDelete('/cve-queue/'+cve.id);
+}
+
+function researchCVE() {
+  const input = document.getElementById('cve-report-input').value.trim();
+  if(!input) return;
+  document.getElementById('cve-report-loading').classList.remove('hidden');
+  document.getElementById('cve-report-result').classList.add('hidden');
+  if(API_BASE) {
+    apiPost('/agents/researcher/cve-report',{query:input}).then(r=>{
+      document.getElementById('cve-report-loading').classList.add('hidden');
+      if(r) displayCVEReport(r);
+    });
+  } else {
+    setTimeout(()=>{
+      document.getElementById('cve-report-loading').classList.add('hidden');
+      displayCVEReport({
+        query: input,
+        summary: '[Demo] CVE report for ' + input + '. Connect API for live data.',
+        vulnerableVersions: '—', fixedVersions: '—',
+        references: ['https://nvd.nist.gov/vuln/detail/' + input],
+        fixSteps: ['Apply vendor patch', 'Verify mitigation'],
+        pocLinks: [], iocs: {ips:[], domains:[], urls:[], hashes:[], filenames:[]}
+      });
+    }, 2000);
+  }
+}
+
+function displayCVEReport(r) {
+  const result = document.getElementById('cve-report-result');
+  result.classList.remove('hidden');
+  result.innerHTML = `
+    <div class="space-y-4">
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Summary</div><div class="text-xs">${r.summary}</div></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Vulnerable</div><div class="mono text-[11px]">${r.vulnerableVersions||'—'}</div></div>
+        <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Fixed</div><div class="mono text-[11px]">${r.fixedVersions||'—'}</div></div>
+      </div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Fix Steps</div><ul class="text-xs space-y-1">${(r.fixSteps||[]).map(s=>'<li class="flex items-start gap-2"><span class="text-cyan">→</span>'+s+'</li>').join('')}</ul></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">References</div><div class="space-y-1">${(r.references||[]).map(u=>'<div class="mono text-[10px] text-cyan break-all">'+u+'</div>').join('')}</div></div>
+      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">IoCs</div>
+        <div class="grid grid-cols-2 gap-2 text-[10px]">
+          <div><span class="text-text2">IPs:</span> <span class="mono">${(r.iocs&&r.iocs.ips||[]).join(', ')||'—'}</span></div>
+          <div><span class="text-text2">Domains:</span> <span class="mono">${(r.iocs&&r.iocs.domains||[]).join(', ')||'—'}</span></div>
+          <div><span class="text-text2">Hashes:</span> <span class="mono">${(r.iocs&&r.iocs.hashes||[]).join(', ')||'—'}</span></div>
+          <div><span class="text-text2">Files:</span> <span class="mono">${(r.iocs&&r.iocs.filenames||[]).join(', ')||'—'}</span></div>
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="exportReport('json')" class="btn-ghost px-3 py-2 rounded text-xs">Export JSON</button>
+        <button onclick="exportReport('markdown')" class="btn-ghost px-3 py-2 rounded text-xs">Export Markdown</button>
+        <button onclick="sendReportToLogbook()" class="btn-primary px-3 py-2 rounded text-xs">Send to Logbook</button>
+      </div>
+    </div>`;
+}
+
+function exportReport(fmt) {
+  const input = document.getElementById('cve-report-input').value.trim();
+  const data = { query: input, exportedAt: new Date().toISOString() };
+  const content = fmt==='json' ? JSON.stringify(data,null,2) : '# CVE Report: ' + input + '\n\n' + JSON.stringify(data,null,2);
+  const blob = new Blob([content], {type:fmt==='json'?'application/json':'text/markdown'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='cve-report.'+(fmt==='json'?'json':'md'); a.click();
+  URL.revokeObjectURL(url);
+}
+
+function sendReportToLogbook() {
+  const input = document.getElementById('cve-report-input').value.trim();
+  if(API_BASE) apiPost('/logbook/entry', {action:'CVE Report generated', query: input});
+}
+
+// ═══════════ TAB 6: MORPHEUS ═══════════
+function fillCommand(cmd) { document.getElementById('morpheus-input').value = cmd; document.getElementById('morpheus-input').focus(); }
+
+function executeMorpheus() {
+  const input = document.getElementById('morpheus-input').value.trim();
+  if(!input) return;
+  document.getElementById('morpheus-input').value='';
+  const ts = new Date().toISOString().substring(11,19);
+  morpheusHistory.unshift({cmd:input, ts});
+  const log = document.getElementById('morpheus-log');
+  if(log.querySelector('.italic')) log.innerHTML='';
+  const entry = document.createElement('div');
+  entry.className = 'border-b border-border pb-2 mb-2';
+  entry.innerHTML = `<div class="text-text2 mb-1">[${ts}] <span class="text-cyan">${input}</span></div><div class="text-text2 skeleton h-3 w-2/3 rounded"></div>`;
+  log.prepend(entry);
+  if(API_BASE) {
+    apiPost('/morpheus/command',{command:input}).then(r=>{
+      entry.querySelector('.skeleton').className='text-xs';
+      entry.querySelector('.skeleton').textContent = r?JSON.stringify(r):'Command acknowledged.';
+    });
+  } else {
+    setTimeout(()=>{
+      entry.querySelector('.skeleton').className='text-xs';
+      entry.querySelector('.skeleton').textContent = '[Demo] Command "'+input+'" acknowledged. Connect API for live responses.';
+    }, 800);
+  }
+  renderMorpheusHistory();
+}
+
+function renderMorpheusHistory() {
+  const h = document.getElementById('morpheus-history');
+  if(morpheusHistory.length===0){ h.innerHTML='<div class="text-text2 italic">No commands executed yet.</div>'; return; }
+  h.innerHTML = morpheusHistory.map(c=>`<div class="flex gap-3 py-1 border-b border-border"><span class="text-text2 shrink-0">${c.ts}</span><span class="text-cyan">${c.cmd}</span></div>`).join('');
+}
+
+function clearMorpheusLog() {
+  document.getElementById('morpheus-log').innerHTML='<div class="text-text2 italic">Awaiting command...</div>';
+}
+
+// ═══════════ INITIALIZATION ═══════════
+renderPipeline();
+initWebSocket();
+
+// Simulate live heartbeat updates
+setInterval(()=>{
+  agents.forEach(a=>{
+    if(a.status!=='offline'){
+      a.cpu = Math.min(100, Math.max(5, a.cpu + Math.floor(Math.random()*11)-5));
+      a.mem = Math.min(100, Math.max(10, a.mem + Math.floor(Math.random()*7)-3));
+      a.lastHeartbeat = new Date().toISOString().substring(11,19) + ' UTC';
+    }
+  });
+  if(currentTab==='health') renderHealth();
+}, 5000);
+</script>
+</body>
+</html>
