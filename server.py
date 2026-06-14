@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Morpheus Mission Control — Backend Server
-ThreadingHTTPServer on 127.0.0.1:51763
+ThreadingHTTPServer on 0.0.0.0:3333
 Serves index.html, /api/snapshot, /events (SSE), and /api/board CRUD.
 """
 
@@ -51,7 +51,7 @@ def init_board_db():
         seeds = [
             ("task-01", "Renew cybersamurai.co.uk SSL certificate",       "pending",  "high",   "Expires 2026-07-15. Check Let Encrypt auto-renew.", now),
             ("task-02", "Write kill-chain blog post for CVE-2024-XXXX",   "pending",  "medium", "Draft on recon → exploit → pivot pipeline.", now),
-            ("task-03", "Harden Morpheus dashboard auth",                 "in_progress","high", "Add JWT + rate limiting to :51763.", now),
+            ("task-03", "Harden Morpheus dashboard auth",                 "in_progress","high", "Add JWT + rate limiting to :3333.", now),
             ("task-04", "Deploy Pivot agent container on VPS",            "in_progress","medium","Check Dockerfile + expose SSH tunnel.", now),
             ("task-05", "Integrate HexStrike MCP into Morpheus pipeline", "completed", "critical","BOAZ evasion + 12 encoders wired.", now),
             ("task-06", "Set up Discord bot webhook for /redteam output", "completed", "high",  "Morpheus#2908 connected + DM auth.", now),
@@ -146,39 +146,57 @@ def gateway_data():
 
 
 def gateway_uptime():
-    """Compute gateway uptime from start_time (integer minutes since epoch?)."""
+    """Compute gateway uptime from start_time."""
     try:
         with open(GATEWAY_STATE_PATH, "r") as f:
             raw = json.load(f)
         st = raw.get("start_time")
         if st is None:
             return "unknown"
-        # start_time is stored as an integer — try interpreting as seconds first
-        # The value 21830609 could be minutes-since-epoch or seconds
-        # 21830609 / 60 / 24 / 365 ≈ 4.15 years — likely minutes
-        # 21830609 seconds ≈ 252 days — also plausible
-        # Let's try: if > 1e9 it's seconds, else minutes
-        if st > 1_000_000_000:
+        # start_time is a custom counter — try minutes-since-epoch first
+        # If the resulting delta is unreasonable (> 30 days or negative), fall back
+        delta = time.time() - (st * 60)
+        if delta < 0 or delta > 30 * 86400:
+            # Try as seconds-since-epoch
             delta = time.time() - st
-        else:
-            delta = time.time() - (st * 60)
-        if delta < 0:
-            delta = 0
+        if delta < 0 or delta > 30 * 86400:
+            # Can't determine — just report running
+            return "running"
         hours = int(delta // 3600)
         mins = int((delta % 3600) // 60)
-        return f"{hours}h {mins}m"
+        if hours > 0:
+            return f"{hours}h {mins}m"
+        return f"{mins}m"
     except Exception:
         return "unknown"
 
 
 def activity_data():
-    """Query agent-logs.db for last 50 entries, per-agent stats, totals, 7-day breakdown."""
+    """
+    Query agent-logs.db for the last 50 entries, per-agent stats
+    (total, completed, failed, last task, last seen, model),
+    overall totals, and a 7-day daily breakdown.
+    Sort by created_at DESC, id DESC.
+    """
     try:
         conn = sqlite3.connect(AGENT_LOGS_DB)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Last 50 entries
+        # Check if agent_logs table exists
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_logs'")
+        if not cur.fetchone():
+            conn.close()
+            return {
+                "ok": True,
+                "recent": [],
+                "agents": {},
+                "totals": {"total": 0, "completed": 0, "failed": 0},
+                "daily": [],
+                "note": "agent_logs table does not exist yet — no activity recorded"
+            }
+
+        # Last 50 entries — sort by created_at DESC, id DESC
         cur.execute("SELECT * FROM agent_logs ORDER BY created_at DESC, id DESC LIMIT 50")
         recent = [dict(r) for r in cur.fetchall()]
 
@@ -242,7 +260,11 @@ def activity_data():
 
 
 def sessions_data():
-    """Query state.db for session/message counts, token totals, 25 recent sessions."""
+    """
+    Query state.db for session count, message count, token totals
+    (input, output, cache), and 25 most recent sessions.
+    Timestamps in state.db are Unix float seconds — pass through as-is.
+    """
     try:
         conn = sqlite3.connect(STATE_DB)
         conn.row_factory = sqlite3.Row
@@ -273,10 +295,15 @@ def sessions_data():
         """)
         sessions = [dict(r) for r in cur.fetchall()]
 
+        # Count active (incomplete) sessions
+        cur.execute("SELECT COUNT(*) as cnt FROM sessions WHERE ended_at IS NULL")
+        active_count = cur.fetchone()["cnt"]
+
         conn.close()
         return {
             "ok": True,
             "session_count": session_count,
+            "active_count": active_count,
             "message_count": message_count,
             "tokens": tokens,
             "recent_sessions": sessions
@@ -287,10 +314,15 @@ def sessions_data():
 
 
 def vps_health():
-    """CPU from /proc/stat, RAM from /proc/meminfo, disk from os.statvfs. No subprocess."""
+    """
+    CPU from two /proc/stat samples, RAM from /proc/meminfo,
+    disk from os.statvfs, network speed from /sys/class/net/.
+    No subprocess calls.
+    """
     result = {"ok": True}
+
+    # ── CPU ──
     try:
-        # ── CPU ──
         def read_cpu():
             with open("/proc/stat") as f:
                 line = f.readline()  # first line is aggregate cpu
@@ -298,7 +330,7 @@ def vps_health():
             return [int(x) for x in fields]
 
         s1 = read_cpu()
-        time.sleep(0.1)
+        time.sleep(0.3)
         s2 = read_cpu()
 
         idle1, idle2 = s1[3], s2[3]
@@ -307,12 +339,15 @@ def vps_health():
         delta_idle = idle2 - idle1
         cpu_pct = round((1 - delta_idle / delta_total) * 100, 1) if delta_total else 0.0
         result["cpu_percent"] = cpu_pct
+
+        # Per-core count
+        result["cpu_cores"] = os.cpu_count()
     except Exception as e:
         result["cpu_percent"] = None
         result["cpu_error"] = str(e)
 
+    # ── RAM ──
     try:
-        # ── RAM ──
         mem = {}
         with open("/proc/meminfo") as f:
             for line in f:
@@ -334,8 +369,8 @@ def vps_health():
         result["ram"] = None
         result["ram_error"] = str(e)
 
+    # ── DISK ──
     try:
-        # ── DISK ──
         st = os.statvfs("/")
         total = st.f_blocks * st.f_frsize
         free = st.f_bavail * st.f_frsize
@@ -350,6 +385,37 @@ def vps_health():
     except Exception as e:
         result["disk"] = None
         result["disk_error"] = str(e)
+
+    # ── NETWORK ──
+    try:
+        net_speed_mbps = None
+        net_iface = None
+        for iface in os.listdir("/sys/class/net/"):
+            if iface == "lo":
+                continue
+            try:
+                state_path = f"/sys/class/net/{iface}/operstate"
+                speed_path = f"/sys/class/net/{iface}/speed"
+                with open(state_path) as f:
+                    operstate = f.read().strip()
+                if operstate != "up":
+                    continue
+                with open(speed_path) as f:
+                    speed_val = f.read().strip()
+                speed_int = int(speed_val)
+                if speed_int > 0:
+                    net_speed_mbps = speed_int
+                    net_iface = iface
+                    break
+            except (OSError, ValueError):
+                continue
+        result["network"] = {
+            "speed_mbps": net_speed_mbps,
+            "interface": net_iface
+        }
+    except Exception as e:
+        result["network"] = None
+        result["network_error"] = str(e)
 
     return result
 
@@ -369,11 +435,8 @@ def cve_reports_list():
                 continue
             fpath = os.path.join(CVE_REPORTS_DIR, fname)
             stat = os.stat(fpath)
-            # Extract CVE ID from filename (e.g. CVE-2026-41096-assessment.md)
             cve_id = fname.replace("-assessment.md", "").replace("_", " ")
-            # Peek first few lines for title / CVSS
             title = cve_id
-            cvss = None
             try:
                 with open(fpath, "r") as f:
                     for line in f:
@@ -398,7 +461,6 @@ def cve_reports_list():
 def cve_report_read(filename):
     """Return the raw markdown content of a single CVE report file."""
     try:
-        # Sanitize: only allow .md files, no path traversal
         if not filename.endswith(".md") or "/" in filename or "\\" in filename or ".." in filename:
             return {"ok": False, "error": "Invalid filename"}
         fpath = os.path.join(CVE_REPORTS_DIR, filename)
@@ -472,6 +534,7 @@ def cron_jobs():
                 "@midnight": "Daily at 00:00",
                 "@hourly": "Every hour at minute 0",
             }
+            matched_at = False
             for at_key, at_desc in at_map.items():
                 if line.startswith(at_key):
                     parts = line.split(None, 1)
@@ -482,31 +545,33 @@ def cron_jobs():
                         "label": label,
                         "raw": line
                     })
+                    matched_at = True
                     break
+            if matched_at:
+                continue
+
+            # Standard 5- or 6-field cron line
+            parts = line.split()
+            if len(parts) < 6:
+                continue
+            if has_username:
+                # 7+ fields: min hour dom month dow user cmd
+                if len(parts) < 7:
+                    continue
+                minute, hour, dom, month, dow = parts[0], parts[1], parts[2], parts[3], parts[4]
+                command = " ".join(parts[6:])
             else:
-                # Standard 5- or 6-field cron line
-                parts = line.split()
+                # 5-field: min hour dom month dow command...
                 if len(parts) < 6:
                     continue
-                if has_username:
-                    # 6-field: min hour dom month dow username command...
-                    # Actually 7+: min hour dom month dow user cmd
-                    if len(parts) < 7:
-                        continue
-                    minute, hour, dom, month, dow = parts[0], parts[1], parts[2], parts[3], parts[4]
-                    command = " ".join(parts[6:])
-                else:
-                    # 5-field: min hour dom month dow command...
-                    if len(parts) < 6:
-                        continue
-                    minute, hour, dom, month, dow = parts[0], parts[1], parts[2], parts[3], parts[4]
-                    command = " ".join(parts[5:])
-                jobs.append({
-                    "schedule": schedule_to_english(minute, hour, dom, month, dow),
-                    "command": command,
-                    "label": label,
-                    "raw": line
-                })
+                minute, hour, dom, month, dow = parts[0], parts[1], parts[2], parts[3], parts[4]
+                command = " ".join(parts[5:])
+            jobs.append({
+                "schedule": schedule_to_english(minute, hour, dom, month, dow),
+                "command": command,
+                "label": label,
+                "raw": line
+            })
 
     try:
         # User crontabs in /var/spool/cron/crontabs/
@@ -560,12 +625,12 @@ def build_snapshot():
     try:
         gw = gateway_data()
         gw["uptime"] = gateway_uptime()
-        # Compute uptime_seconds from gateway uptime string or start_time
+        # Compute uptime_seconds from gateway uptime string
         uptime_seconds = 0
         try:
             uptime_str = gw.get("uptime", "")
-            if isinstance(uptime_str, str) and uptime_str not in ("unknown", ""):
-                # Parse "Xh Ym" format
+            if isinstance(uptime_str, str) and uptime_str not in ("unknown", "running", ""):
+                # Parse "Xh Ym" or "Xm" format
                 h_match = re.search(r'(\d+)h', uptime_str)
                 m_match = re.search(r'(\d+)m', uptime_str)
                 if h_match or m_match:
@@ -582,13 +647,9 @@ def build_snapshot():
     # Activity — reshape to flat structure for JS
     try:
         act = activity_data()
-        # d.activity = recent entries (list of objects with agent_name, task_description, status, created_at)
         snapshot["activity"] = act.get("recent", [])
-        # d.agents = per-agent stats dict
         snapshot["agents"] = act.get("agents", {})
-        # d.activity_by_day = daily breakdown
         snapshot["activity_by_day"] = act.get("daily", [])
-        # d.stats = {total, completed, failed}
         totals = act.get("totals", {})
         snapshot["stats"] = {
             "total": totals.get("total", 0),
@@ -607,6 +668,7 @@ def build_snapshot():
         tokens = sess.get("tokens", {})
         snapshot["sessions"] = {
             "count": sess.get("session_count", 0),
+            "active_count": sess.get("active_count", 0),
             "totals": {
                 "messages": sess.get("message_count", 0),
                 "input_tokens": tokens.get("input", 0),
@@ -614,7 +676,7 @@ def build_snapshot():
             }
         }
     except Exception as e:
-        snapshot["sessions"] = {"count": 0, "totals": {"messages": 0, "input_tokens": 0, "cache_read_tokens": 0}}
+        snapshot["sessions"] = {"count": 0, "active_count": 0, "totals": {"messages": 0, "input_tokens": 0, "cache_read_tokens": 0}}
 
     # VPS Health — add db_size_mb
     try:
@@ -637,12 +699,21 @@ def build_snapshot():
     except Exception as e:
         snapshot["vps"] = {"ok": False, "error": str(e), "db_size_mb": 0}
 
-    # Kanban — total task count
+    # Kanban — full task list + counts
     try:
         tasks = board_list()
-        snapshot["kanban"] = {"total": len(tasks)}
+        pending = sum(1 for t in tasks if t.get("status") == "pending")
+        in_progress = sum(1 for t in tasks if t.get("status") == "in_progress")
+        completed = sum(1 for t in tasks if t.get("status") == "completed")
+        snapshot["kanban"] = {
+            "total": len(tasks),
+            "pending": pending,
+            "in_progress": in_progress,
+            "completed": completed,
+            "tasks": tasks
+        }
     except Exception as e:
-        snapshot["kanban"] = {"total": 0}
+        snapshot["kanban"] = {"total": 0, "pending": 0, "in_progress": 0, "completed": 0, "tasks": []}
 
     # Cron Jobs
     try:
@@ -690,7 +761,7 @@ def sse_pusher():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class Handler(SimpleHTTPRequestHandler):
-    """Custom handler: serves index.json, /api/snapshot, /events (SSE), /api/board CRUD."""
+    """Custom handler: serves index.html, /api/snapshot, /events (SSE), /api/board CRUD."""
 
     def log_message(self, format, *args):
         """Suppress default logging to keep output clean."""
@@ -735,8 +806,7 @@ class Handler(SimpleHTTPRequestHandler):
                 title=title,
                 status=data.get("status", "pending"),
                 priority=data.get("priority", "medium"),
-                notes=data.get("notes", "")
-            )
+                notes=data.get("notes", ""))
             self.serve_json({"ok": True, "task": result})
         elif path == "/api/board/update":
             params = parse_qs(parsed.query)
