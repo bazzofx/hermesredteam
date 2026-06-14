@@ -20,6 +20,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(PROJECT_DIR, "index.html")
 BOARD_DB = os.path.join(PROJECT_DIR, "board.db")
 CVE_REPORTS_DIR = os.path.expanduser("~/Brain/cve-reports")
+ASSESSMENTS_DIR = "/home/joker/Brain/Assessments"
 AGENT_LOGS_DB = os.path.expanduser("~/.hermes/agent-logs.db")
 STATE_DB = os.path.expanduser("~/.hermes/state.db")
 GATEWAY_STATE_PATH = os.path.expanduser("~/.hermes/gateway_state.json")
@@ -514,6 +515,55 @@ def cve_report_read(filename):
         return {"ok": False, "error": str(e)}
 
 
+def assessments_list():
+    """Scan ASSESSMENTS_DIR for <website>/assessment.md files."""
+    try:
+        if not os.path.isdir(ASSESSMENTS_DIR):
+            return {"ok": True, "reports": [], "count": 0, "dir": ASSESSMENTS_DIR}
+        reports = []
+        for entry in sorted(os.scandir(ASSESSMENTS_DIR), key=lambda e: e.name.lower()):
+            if not entry.is_dir():
+                continue
+            md_path = os.path.join(entry.path, "assessment.md")
+            if not os.path.isfile(md_path):
+                continue
+            stat = os.stat(md_path)
+            title = entry.name
+            try:
+                with open(md_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("# "):
+                            title = line[2:].strip()
+                            break
+            except Exception:
+                pass
+            reports.append({
+                "website": entry.name,
+                "title": title,
+                "size_bytes": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+        return {"ok": True, "reports": reports, "count": len(reports)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "reports": []}
+
+
+def assessment_read(website):
+    """Read /home/joker/Brain/Assessments/<website>/assessment.md."""
+    try:
+        if not website or "/" in website or "\\" in website or ".." in website:
+            return {"ok": False, "error": "Invalid name"}
+        md_path = os.path.join(ASSESSMENTS_DIR, website, "assessment.md")
+        if not os.path.isfile(md_path):
+            return {"ok": False, "error": "Report not found"}
+        with open(md_path, "r") as f:
+            content = f.read()
+        return {"ok": True, "website": website, "content": content}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def cron_jobs():
     """
     Parse /var/spool/cron/crontabs/*, /etc/crontab, /etc/cron.d/*.
@@ -821,6 +871,11 @@ class Handler(SimpleHTTPRequestHandler):
         elif path.startswith("/api/cve-report/"):
             filename = path[len("/api/cve-report/"):]
             self.serve_json(cve_report_read(filename))
+        elif path == "/api/assessments":
+            self.serve_json(assessments_list())
+        elif path.startswith("/api/assessment/"):
+            website = path[len("/api/assessment/"):]
+            self.serve_json(assessment_read(website))
         elif path == "/events":
             self.serve_sse()
         elif path == "/api/board":
