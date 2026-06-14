@@ -28,6 +28,9 @@ HOST = "0.0.0.0"
 PORT = 3333
 SSE_INTERVAL = 5  # seconds — matches dashboard poll expectation
 
+# Module-level cache for network delta sampling (no sleep needed)
+_net_cache: dict = {"ts": 0.0, "stats": {}}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BOARD DB — init + helpers
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -387,34 +390,72 @@ def vps_health():
         result["disk_error"] = str(e)
 
     # ── NETWORK ──
+    # Cloud/virtual NICs don't expose a speed via sysfs — use /proc/net/dev
+    # byte counters instead, delta-sampled across successive calls.
     try:
-        net_speed_mbps = None
+        def _read_net_dev() -> dict:
+            stats: dict = {}
+            with open("/proc/net/dev") as f:
+                for line in f.readlines()[2:]:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    iface = parts[0].rstrip(":")
+                    # columns: iface rx_bytes rx_packets ... tx_bytes(col 9)
+                    stats[iface] = {"rx": int(parts[1]), "tx": int(parts[9])}
+            return stats
+
+        now_ts = time.time()
+        cur = _read_net_dev()
+        prev = _net_cache.get("stats", {})
+        prev_ts = _net_cache.get("ts", 0.0)
+        _net_cache["stats"] = cur
+        _net_cache["ts"] = now_ts
+
+        dt = now_ts - prev_ts
         net_iface = None
-        for iface in os.listdir("/sys/class/net/"):
+        rx_mbps = 0.0
+        tx_mbps = 0.0
+        rx_bytes_total = 0
+        tx_bytes_total = 0
+
+        for iface in cur:
             if iface == "lo":
                 continue
+            net_iface = iface
+            rx_bytes_total = cur[iface]["rx"]
+            tx_bytes_total = cur[iface]["tx"]
+            if prev and iface in prev and dt > 0.1:
+                rx_delta = max(0, cur[iface]["rx"] - prev[iface]["rx"])
+                tx_delta = max(0, cur[iface]["tx"] - prev[iface]["tx"])
+                rx_mbps = round(rx_delta * 8 / 1_000_000 / dt, 2)
+                tx_mbps = round(tx_delta * 8 / 1_000_000 / dt, 2)
+            break  # primary interface only
+
+        # Also try sysfs for nominal link speed (informational, may be None on VMs)
+        link_speed_mbps = None
+        if net_iface:
             try:
-                state_path = f"/sys/class/net/{iface}/operstate"
-                speed_path = f"/sys/class/net/{iface}/speed"
-                with open(state_path) as f:
-                    operstate = f.read().strip()
-                if operstate != "up":
-                    continue
-                with open(speed_path) as f:
-                    speed_val = f.read().strip()
-                speed_int = int(speed_val)
-                if speed_int > 0:
-                    net_speed_mbps = speed_int
-                    net_iface = iface
-                    break
-            except (OSError, ValueError):
-                continue
+                with open(f"/sys/class/net/{net_iface}/speed") as f:
+                    spd = int(f.read().strip())
+                if spd > 0:
+                    link_speed_mbps = spd
+            except Exception:
+                pass
+
         result["network"] = {
-            "speed_mbps": net_speed_mbps,
-            "interface": net_iface
+            "interface": net_iface,
+            "rx_mbps": rx_mbps,
+            "tx_mbps": tx_mbps,
+            "speed_mbps": link_speed_mbps,   # nominal link speed (None on most VMs)
+            "rx_bytes_total": rx_bytes_total,
+            "tx_bytes_total": tx_bytes_total,
         }
     except Exception as e:
-        result["network"] = None
+        result["network"] = {
+            "interface": None, "rx_mbps": None, "tx_mbps": None,
+            "speed_mbps": None, "rx_bytes_total": None, "tx_bytes_total": None,
+        }
         result["network_error"] = str(e)
 
     return result

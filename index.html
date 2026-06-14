@@ -223,10 +223,13 @@ tr:hover td{background:rgba(255,255,255,.015)}
               </div>
               <div>
                 <div class="flex items-baseline justify-between mb-1">
-                  <span class="mono text-[10px] text-text2">Network</span>
-                  <span class="mono text-xs" style="color:#ffc107" id="vps-net-speed">—</span>
+                  <span class="mono text-[10px] text-text2">Network I/O</span>
+                  <span class="mono text-[9px] text-text2" id="vps-net-iface"></span>
                 </div>
-                <div class="mono text-[9px] text-text2 text-right mt-0.5" id="vps-net-iface"></div>
+                <div class="flex justify-between mt-0.5">
+                  <span class="mono text-[10px]" style="color:#ffc107">↓ <span id="vps-net-rx">—</span></span>
+                  <span class="mono text-[10px]" style="color:#a78bfa">↑ <span id="vps-net-tx">—</span></span>
+                </div>
               </div>
             </div>
           </div>
@@ -654,8 +657,10 @@ function renderVPS(){
   if(ramEl&&ramBar&&ram.percent!=null){ramEl.textContent=ram.percent.toFixed(1)+'%';ramBar.style.width=Math.min(ram.percent,100)+'%';ramBar.style.background=ram.percent>85?'linear-gradient(90deg,#ef4444,#f97316)':ram.percent>70?'linear-gradient(90deg,#f59e0b,#eab308)':'linear-gradient(90deg,#7c4df0,#d946ef)';if(ramSub)ramSub.textContent=(ram.used_mb||0).toLocaleString()+' / '+(ram.total_mb||0).toLocaleString()+' MB';}
   const diskEl=document.getElementById('vps-disk-pct'), diskBar=document.getElementById('vps-disk-bar'), diskSub=document.getElementById('vps-disk-sub');
   if(diskEl&&diskBar&&disk.percent!=null){diskEl.textContent=disk.percent.toFixed(1)+'%';diskBar.style.width=Math.min(disk.percent,100)+'%';diskBar.style.background=disk.percent>85?'linear-gradient(90deg,#ef4444,#f97316)':disk.percent>70?'linear-gradient(90deg,#f59e0b,#eab308)':'linear-gradient(90deg,#00e676,#00acc1)';if(diskSub)diskSub.textContent=(disk.used_gb||0)+' / '+(disk.total_gb||0)+' GB';}
-  const netEl=document.getElementById('vps-net-speed'), netIface=document.getElementById('vps-net-iface');
-  if(netEl)netEl.textContent=net.speed_mbps!=null?(net.speed_mbps>=1000?(net.speed_mbps/1000).toFixed(0)+' Gbps':net.speed_mbps+' Mbps'):'—';
+  const netRx=document.getElementById('vps-net-rx'), netTx=document.getElementById('vps-net-tx'), netIface=document.getElementById('vps-net-iface');
+  function fmtMbps(v){if(v==null)return'—';if(v>=1000)return(v/1000).toFixed(2)+' Gbps';return v.toFixed(2)+' Mbps';}
+  if(netRx)netRx.textContent=fmtMbps(net.rx_mbps);
+  if(netTx)netTx.textContent=fmtMbps(net.tx_mbps);
   if(netIface)netIface.textContent=net.interface||'';
   const dbEl=document.getElementById('vps-db-size');
   if(dbEl){const s=vps.db_size_mb;if(s!=null)dbEl.textContent=s>=1024?(s/1024).toFixed(1)+' GB':s.toFixed(0)+' MB';}
