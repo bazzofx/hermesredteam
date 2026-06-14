@@ -2,7 +2,8 @@
 """
 Morpheus Mission Control — Backend Server
 ThreadingHTTPServer on 0.0.0.0:3333
-Serves index.html, /api/snapshot, /events (SSE), and /api/board CRUD.
+Serves index.html, /api/snapshot, /events (SSE), /api/board CRUD,
+and /api/pipeline/* for red team pipeline orchestration.
 """
 
 import json
@@ -11,9 +12,12 @@ import sqlite3
 import time
 import uuid
 import re
+import subprocess
+import threading
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timezone, timedelta
+from queue import Queue, Empty
 
 # ─── PATHS ───────────────────────────────────────────────────────────────────
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +28,9 @@ ASSESSMENTS_DIR = "/home/joker/Brain/Assessments"
 AGENT_LOGS_DB = os.path.expanduser("~/.hermes/agent-logs.db")
 STATE_DB = os.path.expanduser("~/.hermes/state.db")
 GATEWAY_STATE_PATH = os.path.expanduser("~/.hermes/gateway_state.json")
+PIPELINE_DB = os.path.join(PROJECT_DIR, "pipeline.db")
+PIPELINE_SCRIPT = os.path.expanduser("~/Brain/Project/AgentOS/flow/redteam-pipeline.sh")
+PIPELINE_WORKSPACE = os.path.expanduser("~/Brain/Project/AgentOS")
 
 HOST = "0.0.0.0"
 PORT = 3333
@@ -125,6 +132,385 @@ def board_delete(tid):
     conn.commit()
     conn.close()
     return deleted
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PIPELINE DB — init + helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def init_pipeline_db():
+    """Create pipeline.db for tracking red team pipeline runs and tasks."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS pipeline_runs (
+        id TEXT PRIMARY KEY,
+        target TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        current_phase TEXT DEFAULT 'recon',
+        engagement_id TEXT,
+        pid INTEGER,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        output_log TEXT DEFAULT ''
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS pipeline_tasks (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        started_at TEXT,
+        completed_at TEXT,
+        output_file TEXT,
+        findings TEXT DEFAULT '[]',
+        FOREIGN KEY (run_id) REFERENCES pipeline_runs(id)
+    )""")
+    conn.commit()
+    conn.close()
+
+
+def pipeline_create_run(target):
+    """Create a new pipeline run and return its ID."""
+    run_id = uuid.uuid4().hex[:12]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.execute(
+        "INSERT INTO pipeline_runs (id, target, status, current_phase, started_at) VALUES (?,?,?,?,?)",
+        (run_id, target, "running", "recon", now)
+    )
+    conn.commit()
+    conn.close()
+    return run_id
+
+
+def pipeline_update_run(run_id, fields):
+    """Update a pipeline run record."""
+    allowed = {"status", "current_phase", "pid", "completed_at", "output_log", "engagement_id"}
+    sets = []
+    vals = []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return
+    vals.append(run_id)
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.execute(f"UPDATE pipeline_runs SET {','.join(sets)} WHERE id=?", vals)
+    conn.commit()
+    conn.close()
+
+
+def pipeline_get_run(run_id):
+    """Get a single pipeline run."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pipeline_runs WHERE id=?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def pipeline_get_active_run():
+    """Get the currently running pipeline, if any."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pipeline_runs WHERE status='running' ORDER BY started_at DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def pipeline_create_task(run_id, target, phase, agent_name):
+    """Create a pipeline task record."""
+    task_id = uuid.uuid4().hex[:12]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.execute(
+        "INSERT INTO pipeline_tasks (id, run_id, target, phase, agent_name, status, started_at) VALUES (?,?,?,?,?,?,?)",
+        (task_id, run_id, target, phase, agent_name, "running", now)
+    )
+    conn.commit()
+    conn.close()
+    return task_id
+
+
+def pipeline_update_task(task_id, fields):
+    """Update a pipeline task."""
+    allowed = {"status", "completed_at", "output_file", "findings"}
+    sets = []
+    vals = []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return
+    vals.append(task_id)
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.execute(f"UPDATE pipeline_tasks SET {','.join(sets)} WHERE id=?", vals)
+    conn.commit()
+    conn.close()
+
+
+def pipeline_get_tasks(run_id):
+    """Get all tasks for a pipeline run."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pipeline_tasks WHERE run_id=? ORDER BY started_at ASC", (run_id,))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def pipeline_get_all_tasks():
+    """Get all pipeline tasks (for dashboard display)."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT t.*, r.target as run_target, r.status as run_status
+        FROM pipeline_tasks t
+        JOIN pipeline_runs r ON t.run_id = r.id
+        ORDER BY t.started_at DESC
+        LIMIT 50
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def pipeline_get_recent_runs(limit=10):
+    """Get recent pipeline runs."""
+    conn = sqlite3.connect(PIPELINE_DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?", (limit,))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PIPELINE EXECUTION ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Pipeline phase definitions
+PIPELINE_PHASES = [
+    {"id": "recon",       "name": "Recon",        "agent": "recon",        "icon": "🔍", "color": "#7DD3FC"},
+    {"id": "researcher",  "name": "Researcher",    "agent": "researcher",   "icon": "📚", "color": "#F472B6"},
+    {"id": "breach",      "name": "Breach",       "agent": "breach",       "icon": "💥", "color": "#E879F9"},
+    {"id": "pivot",       "name": "Pivot",        "agent": "pivot",        "icon": "🔄", "color": "#00acc1"},
+    {"id": "logbook",     "name": "Logbook",      "agent": "logbook",      "icon": "📋", "color": "#00e676"},
+    {"id": "report",      "name": "ReportWriter",  "agent": "report-writer", "icon": "📄", "color": "#ffc107"},
+]
+
+# Global pipeline execution state
+_pipeline_process = None   # subprocess.Popen object
+_pipeline_run_id = None    # current run ID
+_pipeline_progress = {
+    "run_id": None,
+    "target": None,
+    "current_phase": None,
+    "phase_index": -1,
+    "overall_status": "idle",  # idle | running | complete | failed
+    "phases": {},               # phase_id -> {status, started_at, completed_at, output_file}
+    "tasks": [],                # list of task records
+    "log_lines": [],            # recent log lines
+    "started_at": None,
+    "engagement_id": None,
+}
+_pipeline_lock = threading.Lock()
+
+
+def _broadcast_pipeline_event():
+    """Push current pipeline state to all SSE clients."""
+    sse_broadcast({"type": "pipeline", "data": _pipeline_progress})
+
+
+def _append_log(line):
+    """Append a log line, keep last 200."""
+    _pipeline_progress["log_lines"].append(line)
+    if len(_pipeline_progress["log_lines"]) > 200:
+        _pipeline_progress["log_lines"] = _pipeline_progress["log_lines"][-200:]
+
+
+def run_pipeline_async(target):
+    """Launch the redteam pipeline in a background thread."""
+    global _pipeline_process, _pipeline_run_id
+
+    with _pipeline_lock:
+        if _pipeline_process and _pipeline_process.poll() is None:
+            return False, "Pipeline already running"
+
+        run_id = pipeline_create_run(target)
+        _pipeline_run_id = run_id
+
+        # Build initial progress state
+        phases = {}
+        for p in PIPELINE_PHASES:
+            phases[p["id"]] = {"status": "pending", "started_at": None, "completed_at": None, "output_file": None}
+
+        _pipeline_progress.update({
+            "run_id": run_id,
+            "target": target,
+            "current_phase": "recon",
+            "phase_index": 0,
+            "overall_status": "running",
+            "phases": phases,
+            "tasks": [],
+            "log_lines": [],
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "engagement_id": None,
+        })
+
+    # Launch background thread
+    t = threading.Thread(target=_pipeline_worker, args=(run_id, target), daemon=True)
+    t.start()
+    return True, run_id
+
+
+def _pipeline_worker(run_id, target):
+    """Background worker that runs the pipeline script and monitors output."""
+    global _pipeline_process
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe_target = target.replace(":", "-").replace("/", "-")
+    engagement_id = f"{ts}-{safe_target}"
+
+    pipeline_update_run(run_id, {"engagement_id": engagement_id})
+    _pipeline_progress["engagement_id"] = engagement_id
+    _append_log(f"[{ts}] Pipeline started — Target: {target} | Engagement: {engagement_id}")
+    _broadcast_pipeline_event()
+
+    # Create tasks for each phase
+    for phase in PIPELINE_PHASES:
+        task_id = pipeline_create_task(run_id, target, phase["id"], phase["name"])
+        _pipeline_progress["tasks"].append({
+            "id": task_id,
+            "phase": phase["id"],
+            "agent_name": phase["name"],
+            "status": "pending",
+            "target": target,
+        })
+
+    # Launch the pipeline script
+    env = os.environ.copy()
+    env["PIPELINE_TARGET"] = target
+    env["PIPELINE_ENGAGEMENT"] = engagement_id
+    env["PIPELINE_WORKSPACE"] = PIPELINE_WORKSPACE
+
+    try:
+        proc = subprocess.Popen(
+            ["bash", PIPELINE_SCRIPT, target],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=PIPELINE_WORKSPACE,
+            env=env,
+            text=True,
+            bufsize=1,
+        )
+        _pipeline_process = proc
+        pipeline_update_run(run_id, {"pid": proc.pid})
+        _append_log(f"Pipeline PID: {proc.pid}")
+        _broadcast_pipeline_event()
+
+        # Read output line by line, detect phase transitions
+        phase_idx = 0
+        for line in iter(proc.stdout.readline, ""):
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            _append_log(line)
+            _broadcast_pipeline_event()
+
+            # Detect phase transitions from the script output
+            # The script outputs headers like "PHASE 1 — RECON"
+            phase_match = re.search(r'PHASE (\d+) — (\w+)', line)
+            if phase_match:
+                phase_num = int(phase_match.group(1)) - 1
+                if 0 <= phase_num < len(PIPELINE_PHASES):
+                    phase_def = PIPELINE_PHASES[phase_num]
+                    now_iso = datetime.now(timezone.utc).isoformat()
+
+                    # Mark previous phase as complete
+                    if phase_idx > 0:
+                        prev = PIPELINE_PHASES[phase_idx - 1]
+                        _pipeline_progress["phases"][prev["id"]]["status"] = "complete"
+                        _pipeline_progress["phases"][prev["id"]]["completed_at"] = now_iso
+                        # Update task
+                        for t in _pipeline_progress["tasks"]:
+                            if t["phase"] == prev["id"]:
+                                t["status"] = "complete"
+                                t["completed_at"] = now_iso
+
+                    # Mark current phase as running
+                    _pipeline_progress["phases"][phase_def["id"]]["status"] = "running"
+                    _pipeline_progress["phases"][phase_def["id"]]["started_at"] = now_iso
+                    _pipeline_progress["current_phase"] = phase_def["id"]
+                    _pipeline_progress["phase_index"] = phase_num
+                    phase_idx = phase_num + 1
+
+                    # Update task
+                    for t in _pipeline_progress["tasks"]:
+                        if t["phase"] == phase_def["id"]:
+                            t["status"] = "running"
+                            t["started_at"] = now_iso
+
+                    # Update DB
+                    pipeline_update_run(run_id, {"current_phase": phase_def["id"]})
+                    _broadcast_pipeline_event()
+
+            # Detect output file paths
+            out_match = re.search(r'(recon|researcher|breach|pivot|logbook|report-writer)[^\n]*:\s+(~/[^\s]+)', line)
+            if out_match:
+                phase_key = out_match.group(1).replace("-", "")
+                # Map to our phase ids
+                phase_map = {"recon": "recon", "researcher": "researcher", "breach": "breach",
+                             "pivot": "pivot", "logbook": "logbook", "reportwriter": "report"}
+                mapped = phase_map.get(phase_key)
+                if mapped:
+                    _pipeline_progress["phases"][mapped]["output_file"] = out_match.group(2)
+                    _broadcast_pipeline_event()
+
+        # Process finished
+        proc.wait()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Mark last running phase
+        if phase_idx > 0 and phase_idx <= len(PIPELINE_PHASES):
+            last = PIPELINE_PHASES[phase_idx - 1]
+            _pipeline_progress["phases"][last["id"]]["status"] = "complete"
+            _pipeline_progress["phases"][last["id"]]["completed_at"] = now_iso
+            for t in _pipeline_progress["tasks"]:
+                if t["phase"] == last["id"]:
+                    t["status"] = "complete"
+                    t["completed_at"] = now_iso
+
+        if proc.returncode == 0:
+            _pipeline_progress["overall_status"] = "complete"
+            pipeline_update_run(run_id, {"status": "complete", "completed_at": now_iso})
+            _append_log(f"Pipeline complete — Engagement: {engagement_id}")
+        else:
+            _pipeline_progress["overall_status"] = "failed"
+            pipeline_update_run(run_id, {"status": "failed", "completed_at": now_iso})
+            _append_log(f"Pipeline failed (exit {proc.returncode}) — Engagement: {engagement_id}")
+
+        _broadcast_pipeline_event()
+
+    except Exception as e:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        _pipeline_progress["overall_status"] = "failed"
+        _append_log(f"Pipeline error: {str(e)}")
+        pipeline_update_run(run_id, {"status": "failed", "completed_at": now_iso})
+        _broadcast_pipeline_event()
+
+    finally:
+        _pipeline_process = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -852,7 +1238,7 @@ def sse_pusher():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class Handler(SimpleHTTPRequestHandler):
-    """Custom handler: serves index.html, /api/snapshot, /events (SSE), /api/board CRUD."""
+    """Custom handler: serves index.html, /api/snapshot, /events (SSE), /api/board CRUD, /api/pipeline/*."""
 
     def log_message(self, format, *args):
         """Suppress default logging to keep output clean."""
@@ -880,6 +1266,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_sse()
         elif path == "/api/board":
             self.serve_json({"ok": True, "tasks": board_list()})
+        elif path == "/api/pipeline/status":
+            self.serve_json({"ok": True, "pipeline": _pipeline_progress})
+        elif path == "/api/pipeline/tasks":
+            self.serve_json({"ok": True, "tasks": pipeline_get_all_tasks()})
+        elif path == "/api/pipeline/runs":
+            self.serve_json({"ok": True, "runs": pipeline_get_recent_runs()})
         else:
             self.send_error(404)
 
@@ -930,6 +1322,32 @@ class Handler(SimpleHTTPRequestHandler):
                 self.serve_json({"ok": True, "deleted": tid})
             else:
                 self.serve_json({"ok": False, "error": "task not found"}, 404)
+        elif path == "/api/pipeline/start":
+            body = self.rfile.read(content_length)
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                data = {}
+            target = data.get("target", "").strip()
+            if not target:
+                self.serve_json({"ok": False, "error": "target required"}, 400)
+                return
+            ok, result = run_pipeline_async(target)
+            if ok:
+                self.serve_json({"ok": True, "run_id": result, "message": f"Pipeline started for {target}"})
+            else:
+                self.serve_json({"ok": False, "error": result}, 409)
+        elif path == "/api/pipeline/stop":
+            global _pipeline_process
+            if _pipeline_process and _pipeline_process.poll() is None:
+                _pipeline_process.terminate()
+                _pipeline_process = None
+                _pipeline_progress["overall_status"] = "stopped"
+                pipeline_update_run(_pipeline_run_id, {"status": "stopped", "completed_at": datetime.now(timezone.utc).isoformat()})
+                _broadcast_pipeline_event()
+                self.serve_json({"ok": True, "message": "Pipeline stopped"})
+            else:
+                self.serve_json({"ok": False, "error": "No pipeline running"}, 404)
         else:
             self.send_error(404)
 
@@ -969,6 +1387,12 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             self.wfile.write(("data: " + json.dumps({"ok": False, "error": str(e)}) + "\n\n").encode("utf-8"))
             self.wfile.flush()
+        # Send initial pipeline state
+        try:
+            self.wfile.write(("data: " + json.dumps({"type": "pipeline", "data": _pipeline_progress}) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+        except Exception:
+            pass
         # Register client for background pushes
         sse_clients.append((self.rfile, self.wfile))
         # Keep connection alive — block this thread
@@ -994,11 +1418,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main():
     init_board_db()
+    init_pipeline_db()
 
     server = ThreadingHTTPServer((HOST, PORT), Handler)
 
     # Start SSE pusher in a daemon thread
-    import threading
     pusher = threading.Thread(target=sse_pusher, daemon=True)
     pusher.start()
 
@@ -1006,6 +1430,7 @@ def main():
     print(f"[Morpheus] SSE stream:     http://{HOST}:{PORT}/events")
     print(f"[Morpheus] Snapshot API:   http://{HOST}:{PORT}/api/snapshot")
     print(f"[Morpheus] Task Board API: http://{HOST}:{PORT}/api/board")
+    print(f"[Morpheus] Pipeline API:   http://{HOST}:{PORT}/api/pipeline/*")
     print(f"[Morpheus] Press Ctrl+C to stop.")
 
     try:

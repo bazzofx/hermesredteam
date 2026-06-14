@@ -110,6 +110,14 @@ tr:hover td{background:rgba(255,255,255,.015)}
 .fade-cycle-in{animation:fade-cycle-in 2.6s ease-in-out}
 @keyframes pulse-segment{0%,100%{opacity:.55}50%{opacity:1;box-shadow:0 0 6px currentColor}}
 .pulse-segment{animation:pulse-segment 2.4s ease-in-out infinite}
+@keyframes blink-busy{0%,100%{opacity:1}50%{opacity:.4}}
+.blink-busy{animation:blink-busy 1.2s ease-in-out infinite}
+@keyframes glow-pulse{0%,100%{box-shadow:0 0 8px var(--glow-color,rgba(255,193,7,.4))}50%{box-shadow:0 0 20px var(--glow-color,rgba(255,193,7,.7))}}
+.glow-pulse{animation:glow-pulse 1.5s ease-in-out infinite}
+@keyframes log-slide-in{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
+.log-slide-in{animation:log-slide-in .2s ease-out}
+@keyframes task-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.task-enter{animation:task-enter .3s ease-out}
 @keyframes bar-fill-in{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .bar-fill-in{animation:bar-fill-in .8s ease-out forwards;transform-origin:left}
 @keyframes slide-in-top{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
@@ -374,13 +382,64 @@ tr:hover td{background:rgba(255,255,255,.015)}
         <p class="text-xs text-text2 mt-1">6-agent red team orchestration flow</p>
       </div>
       <div class="flex items-center gap-2">
-        <button onclick="pipelineAction('start')" class="btn-primary px-4 py-2 rounded text-xs font-medium">Start</button>
-        <button onclick="pipelineAction('pause')" class="btn-ghost px-4 py-2 rounded text-xs font-medium">Pause</button>
-        <button onclick="pipelineAction('resume')" class="btn-ghost px-4 py-2 rounded text-xs font-medium">Resume</button>
-        <button onclick="pipelineAction('reset')" class="btn-danger px-4 py-2 rounded text-xs font-medium">Reset</button>
+        <span id="pipeline-overall-status" class="mono text-[10px] px-2 py-1 rounded" style="background:rgba(255,255,255,.04);color:#7a8190;border:1px solid rgba(255,255,255,.06)">IDLE</span>
+        <button onclick="stopPipeline()" id="btn-stop-pipeline" class="btn-danger px-4 py-2 rounded text-xs font-medium hidden">Stop</button>
       </div>
     </div>
-    <div class="card p-6 mb-6"><div class="flex items-center justify-between" id="pipeline-nodes"></div></div>
+
+    <!-- PIPELINE NODES — agent icons in a row -->
+    <div class="card p-6 mb-6">
+      <div class="flex items-center justify-between relative" id="pipeline-nodes">
+        <!-- Connecting line behind nodes -->
+        <div class="absolute top-1/2 left-[10%] right-[10%] h-[2px] -translate-y-1/2 z-0" style="background:linear-gradient(90deg,#1e2230,#1e2230)"></div>
+      </div>
+    </div>
+
+    <!-- CURRENT STAGE + LOG -->
+    <div class="grid gap-4 mb-6" style="grid-template-columns:280px 1fr">
+      <!-- Current stage card -->
+      <div class="card p-5">
+        <div class="mono text-[10px] tracking-widest text-text2 uppercase mb-3">Current Stage</div>
+        <div id="pipeline-current-stage" class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full border-2 flex items-center justify-center text-base" style="border-color:#1e2230;color:#7a8190">—</div>
+          <div>
+            <div class="text-sm font-medium" style="color:#7a8190">Waiting...</div>
+            <div class="text-[10px] text-text2">No active pipeline</div>
+          </div>
+        </div>
+        <div id="pipeline-target-display" class="hidden">
+          <div class="mono text-[10px] text-text2 uppercase tracking-wider mb-1">Target</div>
+          <div class="mono text-xs truncate" id="pipeline-target-text" style="color:#00acc1"></div>
+        </div>
+        <div id="pipeline-engagement-display" class="hidden mt-2">
+          <div class="mono text-[10px] text-text2 uppercase tracking-wider mb-1">Engagement</div>
+          <div class="mono text-[10px] truncate text-text2" id="pipeline-engagement-text"></div>
+        </div>
+      </div>
+      <!-- Live log -->
+      <div class="card p-5 flex flex-col" style="min-height:160px">
+        <div class="flex items-center justify-between mb-3">
+          <div class="mono text-[10px] tracking-widest text-text2 uppercase">Live Log</div>
+          <div class="mono text-[10px] text-text2" id="log-line-count">0 lines</div>
+        </div>
+        <div id="pipeline-log" class="flex-1 overflow-y-auto mono text-[11px] space-y-0.5" style="max-height:120px">
+          <div class="text-text2 italic">Awaiting pipeline...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TASK TRACKER — per-agent task cards -->
+    <div class="card p-5 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="mono text-[10px] tracking-widest text-text2 uppercase">Task Tracker</div>
+        <div class="mono text-[10px] text-text2" id="task-count">0 tasks</div>
+      </div>
+      <div id="pipeline-task-list" class="space-y-2">
+        <div class="text-text2 italic text-xs text-center py-4">Deploy a workload to begin tracking</div>
+      </div>
+    </div>
+
+    <!-- DEPLOY WORKLOAD -->
     <div class="card p-5">
       <h3 class="text-sm font-medium mb-3">Deploy Workload</h3>
       <div class="flex gap-3">
@@ -574,14 +633,6 @@ const CRON_AGENTS = [
   {id:'logger',name:'Logger',icon:'📋',color:'#00e676'},
   {id:'writer',name:'ReportWriter',icon:'📄',color:'#ffc107'},
 ];
-const pipelineAgents = [
-  {id:'recon',name:'Recon',icon:'🔍',color:'#7DD3FC',status:'online',cpu:12,mem:34,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-  {id:'researcher',name:'Researcher',icon:'📚',color:'#F472B6',status:'online',cpu:8,mem:28,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-  {id:'breach',name:'Breach',icon:'💥',color:'#E879F9',status:'online',cpu:15,mem:41,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-  {id:'pivot',name:'Pivot',icon:'🔄',color:'#00acc1',status:'online',cpu:5,mem:22,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-  {id:'logger',name:'Logger',icon:'📋',color:'#00e676',status:'online',cpu:3,mem:18,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-  {id:'writer',name:'ReportWriter',icon:'📄',color:'#ffc107',status:'online',cpu:2,mem:15,uptime:'2h 14m',lastHeartbeat:'0m ago'},
-];
 
 let d = {
   agents:{}, activity:[], activity_by_day:[], vps:{},
@@ -613,7 +664,7 @@ function switchTab(tab){
     else{b.classList.remove('tab-active');b.classList.add('tab-inactive');}
   });
   if(tab==='health')startOverview(); else stopOverview();
-  if(tab==='pipeline'&&!pipelineRendered){renderPipeline();pipelineRendered=true;}
+  if(tab==='pipeline'){fetchPipelineStatus();if(!pipelineRendered){renderPipeline();pipelineRendered=true;}}
   if(tab==='board')renderTaskBoard();
   if(tab==='cve')renderCVEQueue();
   if(tab==='reports')renderReports();
@@ -639,7 +690,11 @@ function connectSSE(){
     const es=new EventSource(SSE_URL);
     es.onopen=()=>{sseConnected=true;};
     es.onmessage=(e)=>{
-      try{const data=JSON.parse(e.data);mergeData(data);if(currentTab==='health')renderOverview();if(currentTab==='board')renderTaskBoard();}catch(err){}
+      try{
+        const data=JSON.parse(e.data);
+        if(data.type==='pipeline' && data.data){handlePipelineEvent(data.data);}
+        else{mergeData(data);if(currentTab==='health')renderOverview();if(currentTab==='board')renderTaskBoard();}
+      }catch(err){}
     };
     es.onerror=()=>{sseConnected=false;es.close();};
   }catch(e){}
@@ -924,36 +979,356 @@ function submitTaskEdit(){
 function deleteTask(id){if(!confirm('Delete this task?'))return;fetch(API_BASE+'/api/board/delete?id='+encodeURIComponent(id),{method:'POST'}).then(r=>r.json()).then(data=>{if(data.ok)refreshSnapshot();});}
 function refreshSnapshot(){fetch(API_BASE+'/api/snapshot').then(r=>r.json()).then(data=>{mergeData(data);renderTaskBoard();});}
 
-// PIPELINE
-function getStatusColor(s){if(s==='online')return'#00e676';if(s==='busy')return'#ffc107';return'#d32f2f';}
-function getStatusGlow(s){if(s==='online')return'node-glow-online';if(s==='busy')return'node-glow-busy';return'node-glow-offline';}
-function renderPipeline(){
-  const c=document.getElementById('pipeline-nodes');let h='';
-  pipelineAgents.forEach((a,i)=>{
-    const cl=getStatusColor(a.status);
-    h+=`<div class="flex flex-col items-center gap-2 cursor-pointer group" onclick="openNodeDossier('${a.id}')"><div class="w-14 h-14 rounded-full border-2 flex items-center justify-center text-lg font-bold ${getStatusGlow(a.status)} transition-all group-hover:scale-110" style="border-color:${cl};color:${cl}">${a.icon}</div><span class="text-xs font-medium" style="color:${cl}">${a.name}</span><span class="text-[10px] text-text2 capitalize">${a.status}</span></div>`;
-    if(i<pipelineAgents.length-1)h+=`<div class="flex-1 flex items-center justify-center"><div class="w-full h-[2px] bg-gradient-to-r from-border to-border relative"><div class="absolute -top-[3px] right-0 w-0 h-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-l-[6px] border-l-border"></div></div></div>`;
-  });c.innerHTML=h;
+// ══════════════════════════════════════════════════════════════════════════
+// PIPELINE — real-time red team orchestration
+// ══════════════════════════════════════════════════════════════════════════
+
+// Pipeline phase definitions (mirrors server PIPELINE_PHASES)
+const PIPELINE_PHASES = [
+  {id:'recon',      name:'Recon',       icon:'🔍', color:'#7DD3FC', agent:'recon'},
+  {id:'researcher', name:'Researcher',   icon:'📚', color:'#F472B6', agent:'researcher'},
+  {id:'breach',     name:'Breach',       icon:'💥', color:'#E879F9', agent:'breach'},
+  {id:'pivot',      name:'Pivot',        icon:'🔄', color:'#00acc1', agent:'pivot'},
+  {id:'logbook',    name:'Logbook',      icon:'📋', color:'#00e676', agent:'logbook'},
+  {id:'report',     name:'ReportWriter', icon:'📄', color:'#ffc107', agent:'report-writer'},
+];
+
+// Live pipeline state (updated from SSE events)
+let pipelineState = {
+  run_id: null,
+  target: null,
+  current_phase: null,
+  phase_index: -1,
+  overall_status: 'idle',
+  phases: {},
+  tasks: [],
+  log_lines: [],
+  started_at: null,
+  engagement_id: null,
+};
+
+// ── Pipeline node rendering ──────────────────────────────────────────────
+function phaseStatusIcon(status) {
+  if (status === 'running')  return '<span class="w-2 h-2 rounded-full bg-[#ffc107] blink-busy inline-block"></span>';
+  if (status === 'complete') return '<span class="w-2 h-2 rounded-full bg-[#00e676] inline-block"></span>';
+  if (status === 'failed')   return '<span class="w-2 h-2 rounded-full bg-[#d32f2f] inline-block"></span>';
+  return '<span class="w-2 h-2 rounded-full bg-[#1e2230] inline-block"></span>';
 }
-function openNodeDossier(agentId){
-  const agent=pipelineAgents.find(a=>a.id===agentId);if(!agent)return;
-  document.getElementById('node-modal-title').textContent=agent.name+' — Threat Dossier';
-  const c=getStatusColor(agent.status);
-  document.getElementById('node-modal-body').innerHTML=`<div class="space-y-4"><div class="flex items-center gap-4"><div class="w-16 h-16 rounded-full border-2 flex items-center justify-center text-2xl font-bold" style="border-color:${c};color:${c}">${agent.icon}</div><div><div class="font-semibold text-base">${agent.name}</div><div class="text-xs capitalize" style="color:${c}">${agent.status}</div></div></div><div class="grid grid-cols-2 gap-3"><div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">CPU Usage</div><div class="mono text-sm font-medium">${agent.cpu}%</div><div class="progress-bar mt-2"><div class="progress-fill" style="width:${agent.cpu}%;background:${agent.cpu>80?'#d32f2f':agent.cpu>50?'#ffc107':'#00acc1'}"></div></div></div><div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Memory</div><div class="mono text-sm font-medium">${agent.mem}%</div><div class="progress-bar mt-2"><div class="progress-fill" style="width:${agent.mem}%;background:${agent.mem>80?'#d32f2f':agent.mem>50?'#ffc107':'#00acc1'}"></div></div></div><div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Uptime</div><div class="mono text-sm font-medium">${agent.uptime}</div></div><div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Last Heartbeat</div><div class="mono text-sm font-medium">${agent.lastHeartbeat}</div></div></div></div>`;
-  document.getElementById('node-modal').classList.remove('hidden');
+
+function renderPipelineNodes() {
+  const c = document.getElementById('pipeline-nodes');
+  if (!c) return;
+  let h = '';
+  PIPELINE_PHASES.forEach((p, i) => {
+    const ps = pipelineState.phases[p.id] || {};
+    const status = ps.status || 'pending';
+    const isRunning = status === 'running';
+    const isComplete = status === 'complete';
+    const isFailed = status === 'failed';
+    const borderCol = isRunning ? p.color : isComplete ? '#00e676' : isFailed ? '#d32f2f' : '#1e2230';
+    const textCol = isRunning ? p.color : isComplete ? '#00e676' : isFailed ? '#d32f2f' : '#7a8190';
+    const glowClass = isRunning ? 'glow-pulse' : '';
+    const blinkClass = isRunning ? 'blink-busy' : '';
+    const glowStyle = isRunning ? `--glow-color:${p.color}` : '';
+
+    // Build tooltip from tasks
+    const phaseTasks = (pipelineState.tasks || []).filter(t => t.phase === p.id);
+    let tooltipLines = '';
+    if (phaseTasks.length > 0) {
+      tooltipLines = phaseTasks.map(t => `${t.agent_name}: ${t.status}`).join('\n');
+    } else if (isRunning) {
+      tooltipLines = `${p.name} — running on ${pipelineState.target || 'unknown'}`;
+    } else {
+      tooltipLines = `${p.name} — ${status}`;
+    }
+
+    h += `<div class="flex flex-col items-center gap-1.5 cursor-pointer group relative z-10" onclick="openNodeDossier('${p.id}')" title="${tooltipLines.replace(/"/g, '&quot;')}">`;
+    h += `<div class="w-14 h-14 rounded-full border-2 flex items-center justify-center text-lg font-bold transition-all group-hover:scale-110 ${glowClass} ${blinkClass}" style="border-color:${borderCol};color:${textCol};background:${isRunning ? p.color + '11' : 'transparent'};${glowStyle}">${p.icon}</div>`;
+    h += `<span class="text-[11px] font-medium" style="color:${textCol}">${p.name}</span>`;
+    h += `<span class="text-[9px] text-text2 flex items-center gap-1">${phaseStatusIcon(status)} ${status}</span>`;
+
+    // Hover tooltip — shows active task info
+    if (isRunning && phaseTasks.length > 0) {
+      h += `<div class="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-surface2 border border-border rounded-lg p-3 shadow-xl z-20 hidden group-hover:block w-56" style="pointer-events:none">`;
+      h += `<div class="mono text-[9px] text-text2 uppercase tracking-wider mb-1.5">Active Tasks</div>`;
+      phaseTasks.forEach(t => {
+        h += `<div class="flex items-center gap-2 mb-1"><span class="w-1.5 h-1.5 rounded-full" style="background:${t.status === 'running' ? '#ffc107' : t.status === 'complete' ? '#00e676' : '#7a8190'}"></span><span class="text-[10px] text-text truncate">${t.target}</span></div>`;
+      });
+      h += `</div>`;
+    }
+
+    h += `</div>`;
+
+    // Arrow connector between nodes
+    if (i < PIPELINE_PHASES.length - 1) {
+      const nextStatus = (pipelineState.phases[PIPELINE_PHASES[i + 1].id] || {}).status || 'pending';
+      const arrowCol = isComplete ? '#00e676' : '#1e2230';
+      h += `<div class="flex-1 flex items-center justify-center relative z-0"><div class="w-full h-[2px]" style="background:${arrowCol}"></div><div class="absolute -top-[3px] right-0 w-0 h-0 border-t-[4px] border-t-transparent border-b-[4px] border-b-transparent border-l-[6px]" style="border-left-color:${arrowCol}"></div></div>`;
+    }
+  });
+  c.innerHTML = h;
 }
-function pipelineAction(action){
-  if(action==='reset')pipelineAgents.forEach(a=>a.status='online');
-  else if(action==='start')pipelineAgents.forEach(a=>a.status=a.id==='recon'?'busy':'online');
-  else if(action==='pause')pipelineAgents.forEach(a=>a.status='offline');
-  else if(action==='resume')pipelineAgents.forEach(a=>a.status='online');
+
+// ── Current stage card ───────────────────────────────────────────────────
+function renderCurrentStage() {
+  const el = document.getElementById('pipeline-current-stage');
+  if (!el) return;
+
+  if (pipelineState.overall_status === 'idle' || !pipelineState.current_phase) {
+    el.innerHTML = '<div class="w-10 h-10 rounded-full border-2 flex items-center justify-center text-base" style="border-color:#1e2230;color:#7a8190">—</div><div><div class="text-sm font-medium" style="color:#7a8190">Waiting...</div><div class="text-[10px] text-text2">No active pipeline</div></div>';
+    document.getElementById('pipeline-target-display').classList.add('hidden');
+    document.getElementById('pipeline-engagement-display').classList.add('hidden');
+    return;
+  }
+
+  const phase = PIPELINE_PHASES.find(p => p.id === pipelineState.current_phase);
+  if (!phase) return;
+
+  el.innerHTML = `<div class="w-10 h-10 rounded-full border-2 flex items-center justify-center text-base blink-busy" style="border-color:${phase.color};color:${phase.color};background:${phase.color}11">${phase.icon}</div><div><div class="text-sm font-medium" style="color:${phase.color}">${phase.name}</div><div class="text-[10px] text-text2">Processing ${pipelineState.target || '...'}</div></div>`;
+
+  // Show target
+  const tEl = document.getElementById('pipeline-target-display');
+  tEl.classList.remove('hidden');
+  document.getElementById('pipeline-target-text').textContent = pipelineState.target || '';
+
+  // Show engagement
+  if (pipelineState.engagement_id) {
+    const eEl = document.getElementById('pipeline-engagement-display');
+    eEl.classList.remove('hidden');
+    document.getElementById('pipeline-engagement-text').textContent = pipelineState.engagement_id;
+  }
+}
+
+// ── Overall status badge ────────────────────────────────────────────────
+function renderOverallStatus() {
+  const el = document.getElementById('pipeline-overall-status');
+  const stopBtn = document.getElementById('btn-stop-pipeline');
+  if (!el) return;
+
+  const s = pipelineState.overall_status;
+  if (s === 'running') {
+    el.textContent = 'RUNNING';
+    el.style.color = '#ffc107';
+    el.style.background = 'rgba(255,193,7,.1)';
+    el.style.borderColor = 'rgba(255,193,7,.3)';
+    stopBtn.classList.remove('hidden');
+  } else if (s === 'complete') {
+    el.textContent = 'COMPLETE';
+    el.style.color = '#00e676';
+    el.style.background = 'rgba(0,230,118,.1)';
+    el.style.borderColor = 'rgba(0,230,118,.3)';
+    stopBtn.classList.add('hidden');
+  } else if (s === 'failed') {
+    el.textContent = 'FAILED';
+    el.style.color = '#d32f2f';
+    el.style.background = 'rgba(211,47,47,.1)';
+    el.style.borderColor = 'rgba(211,47,47,.3)';
+    stopBtn.classList.add('hidden');
+  } else if (s === 'stopped') {
+    el.textContent = 'STOPPED';
+    el.style.color = '#7a8190';
+    el.style.background = 'rgba(255,255,255,.04)';
+    el.style.borderColor = 'rgba(255,255,255,.06)';
+    stopBtn.classList.add('hidden');
+  } else {
+    el.textContent = 'IDLE';
+    el.style.color = '#7a8190';
+    el.style.background = 'rgba(255,255,255,.04)';
+    el.style.borderColor = 'rgba(255,255,255,.06)';
+    stopBtn.classList.add('hidden');
+  }
+}
+
+// ── Live log ────────────────────────────────────────────────────────────
+function renderPipelineLog() {
+  const el = document.getElementById('pipeline-log');
+  const countEl = document.getElementById('log-line-count');
+  if (!el) return;
+
+  const lines = pipelineState.log_lines || [];
+  if (countEl) countEl.textContent = lines.length + ' lines';
+
+  if (lines.length === 0) {
+    el.innerHTML = '<div class="text-text2 italic">Awaiting pipeline...</div>';
+    return;
+  }
+
+  // Show last 50 lines
+  const visible = lines.slice(-50);
+  el.innerHTML = visible.map(line => {
+    // Colorize phase headers
+    let html = line
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (html.includes('PHASE')) {
+      html = `<span style="color:#00acc1;font-weight:600">${html}</span>`;
+    } else if (html.includes('COMPLETE') || html.includes('complete')) {
+      html = `<span style="color:#00e676">${html}</span>`;
+    } else if (html.includes('failed') || html.includes('Failed') || html.includes('ERROR')) {
+      html = `<span style="color:#d32f2f">${html}</span>`;
+    } else if (html.includes('started') || html.includes('Started')) {
+      html = `<span style="color:#ffc107">${html}</span>`;
+    }
+    return `<div class="log-slide-in" style="color:#c8cdd8;white-space:pre-wrap;word-break:break-all">${html}</div>`;
+  }).join('');
+
+  // Auto-scroll to bottom
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Task tracker ────────────────────────────────────────────────────────
+function renderTaskTracker() {
+  const el = document.getElementById('pipeline-task-list');
+  const countEl = document.getElementById('task-count');
+  if (!el) return;
+
+  const tasks = pipelineState.tasks || [];
+  if (countEl) countEl.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+
+  if (tasks.length === 0) {
+    el.innerHTML = '<div class="text-text2 italic text-xs text-center py-4">Deploy a workload to begin tracking</div>';
+    return;
+  }
+
+  el.innerHTML = tasks.map(t => {
+    const phase = PIPELINE_PHASES.find(p => p.id === t.phase);
+    const color = phase ? phase.color : '#7a8190';
+    const icon = phase ? phase.icon : '•';
+    const isRunning = t.status === 'running';
+    const isComplete = t.status === 'complete';
+    const isFailed = t.status === 'failed';
+    const statusDot = isRunning ? '#ffc107' : isComplete ? '#00e676' : isFailed ? '#d32f2f' : '#7a8190';
+    const bgCol = isRunning ? 'rgba(255,193,7,.04)' : isComplete ? 'rgba(0,230,118,.03)' : 'transparent';
+    const borderCol = isRunning ? 'rgba(255,193,7,.15)' : isComplete ? 'rgba(0,230,118,.1)' : 'rgba(30,34,48,.5)';
+
+    return `<div class="flex items-center gap-3 p-2.5 rounded task-enter" style="background:${bgCol};border:1px solid ${borderCol}">
+      <span class="text-base">${icon}</span>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-medium" style="color:${color}">${t.agent_name}</span>
+          <span class="w-1.5 h-1.5 rounded-full" style="background:${statusDot}${isRunning ? ';animation:blink-busy 1.2s ease-in-out infinite' : ''}"></span>
+          <span class="text-[9px] text-text2 capitalize">${t.status}</span>
+        </div>
+        <div class="text-[10px] text-text2 truncate mt-0.5">${t.target}</div>
+      </div>
+      ${t.output_file ? `<span class="mono text-[9px] text-text2 shrink-0 truncate max-w-[140px]" title="${t.output_file}">${t.output_file.replace(/^~\//, '')}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── Master render ───────────────────────────────────────────────────────
+function renderPipeline() {
+  renderPipelineNodes();
+  renderCurrentStage();
+  renderOverallStatus();
+  renderPipelineLog();
+  renderTaskTracker();
+}
+
+// ── Pipeline event handler (called from SSE) ────────────────────────────
+function handlePipelineEvent(data) {
+  if (!data) return;
+  pipelineState = data;
   renderPipeline();
 }
-function deployWorkload(){
-  const target=document.getElementById('redteam-target').value.trim();const s=document.getElementById('deploy-status');
-  if(!target){s.textContent='Please enter a target.';s.classList.remove('hidden');s.className='mt-3 text-xs text-red';return;}
-  s.textContent='Deploying workload to '+target+'...';s.classList.remove('hidden');s.className='mt-3 text-xs text-cyan';
-  setTimeout(()=>{s.textContent='[Demo] Pipeline initiated for '+target;},1500);
+
+// ── Deploy workload — calls the real API ────────────────────────────────
+function deployWorkload() {
+  const target = document.getElementById('redteam-target').value.trim();
+  const s = document.getElementById('deploy-status');
+  if (!target) {
+    s.textContent = 'Please enter a target.';
+    s.classList.remove('hidden');
+    s.className = 'mt-3 text-xs text-red';
+    return;
+  }
+  s.textContent = 'Deploying workload to ' + target + '...';
+  s.classList.remove('hidden');
+  s.className = 'mt-3 text-xs text-cyan';
+
+  fetch(API_BASE + '/api/pipeline/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({target: target})
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.ok) {
+      s.textContent = 'Pipeline started — Run ID: ' + data.run_id;
+      s.className = 'mt-3 text-xs text-mint';
+    } else {
+      s.textContent = 'Error: ' + (data.error || 'Failed to start pipeline');
+      s.className = 'mt-3 text-xs text-red';
+    }
+  })
+  .catch(err => {
+    s.textContent = 'Network error: ' + err.message;
+    s.className = 'mt-3 text-xs text-red';
+  });
+}
+
+// ── Stop pipeline ───────────────────────────────────────────────────────
+function stopPipeline() {
+  if (!confirm('Stop the running pipeline?')) return;
+  fetch(API_BASE + '/api/pipeline/stop', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) {
+        alert('Error: ' + (data.error || 'Failed to stop'));
+      }
+    });
+}
+
+// ── Node dossier modal (enhanced with live task info) ───────────────────
+function openNodeDossier(agentId) {
+  const phase = PIPELINE_PHASES.find(p => p.id === agentId);
+  if (!phase) return;
+
+  const ps = pipelineState.phases[agentId] || {};
+  const status = ps.status || 'pending';
+  const isRunning = status === 'running';
+  const statusColor = isRunning ? '#ffc107' : status === 'complete' ? '#00e676' : status === 'failed' ? '#d32f2f' : '#7a8190';
+
+  // Find tasks for this phase
+  const phaseTasks = (pipelineState.tasks || []).filter(t => t.phase === agentId);
+
+  let tasksHtml = '';
+  if (phaseTasks.length > 0) {
+    tasksHtml = '<div class="mt-4"><div class="mono text-[10px] text-text2 uppercase tracking-wider mb-2">Tasks</div>' +
+      phaseTasks.map(t => `<div class="flex items-center gap-2 py-1.5 border-b" style="border-color:rgba(30,34,48,.5)"><span class="w-1.5 h-1.5 rounded-full" style="background:${t.status === 'running' ? '#ffc107' : t.status === 'complete' ? '#00e676' : '#7a8190'}"></span><span class="text-[11px] text-text flex-1">${t.target}</span><span class="text-[9px] text-text2 capitalize">${t.status}</span></div>`).join('') +
+      '</div>';
+  }
+
+  document.getElementById('node-modal-title').textContent = phase.name + ' — Threat Dossier';
+  document.getElementById('node-modal-body').innerHTML = `<div class="space-y-4">
+    <div class="flex items-center gap-4">
+      <div class="w-16 h-16 rounded-full border-2 flex items-center justify-center text-2xl font-bold ${isRunning ? 'blink-busy' : ''}" style="border-color:${statusColor};color:${statusColor};background:${isRunning ? statusColor + '11' : 'transparent'}">${phase.icon}</div>
+      <div>
+        <div class="font-semibold text-base">${phase.name}</div>
+        <div class="text-xs capitalize" style="color:${statusColor}">${status}</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Agent</div><div class="mono text-sm font-medium">${phase.agent}</div></div>
+      <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Phase</div><div class="mono text-sm font-medium">${phase.id}</div></div>
+      <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Started</div><div class="mono text-sm font-medium">${ps.started_at ? ps.started_at.substring(11, 19) : '—'}</div></div>
+      <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Completed</div><div class="mono text-sm font-medium">${ps.completed_at ? ps.completed_at.substring(11, 19) : '—'}</div></div>
+    </div>
+    ${ps.output_file ? `<div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Output File</div><div class="mono text-[11px] text-cyan break-all">${ps.output_file}</div></div>` : ''}
+    ${tasksHtml}
+  </div>`;
+  document.getElementById('node-modal').classList.remove('hidden');
+}
+
+// ── Fetch pipeline status on tab switch ─────────────────────────────────
+function fetchPipelineStatus() {
+  fetch(API_BASE + '/api/pipeline/status')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok && data.pipeline) {
+        handlePipelineEvent(data.pipeline);
+      }
+    })
+    .catch(() => {});
 }
 
 // CVE
@@ -1121,7 +1496,6 @@ function openReport(website){
 
 // INIT
 setTimeout(()=>{switchTab('health');},100);
-setInterval(()=>{pipelineAgents.forEach(a=>{if(a.status!=='offline'){a.cpu=Math.min(100,Math.max(5,a.cpu+Math.floor(Math.random()*11)-5));a.mem=Math.min(100,Math.max(10,a.mem+Math.floor(Math.random()*7)-3));a.lastHeartbeat=new Date().toISOString().substring(11,19)+' UTC';}});},5000);
 </script>
 </body>
 </html>
