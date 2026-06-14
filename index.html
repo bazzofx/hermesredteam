@@ -320,26 +320,27 @@ tr:hover td{background:rgba(255,255,255,.015)}
       </div>
     </div>
 
-    <!-- ACTIVITY FEED + THROUGHPUT -->
-    <div class="grid gap-4" style="grid-template-columns:1fr 1.8fr">
-      <div class="glass p-5">
-        <div class="flex items-baseline justify-between mb-3">
-          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Activity Feed</span>
-          <span class="mono text-[10px] text-text2" id="activity-count">0 entries</span>
-        </div>
-        <div id="activity-feed" class="activity-scroll space-y-1.5">
-          <div class="text-text2 text-xs italic">Connecting to event stream...</div>
-        </div>
-      </div>
-      <div class="glass p-5">
-        <div class="flex items-baseline gap-3 mb-1">
-          <span class="mono font-bold" style="font-size:clamp(34px,4vw,56px);color:#00acc1" id="spark-total">0</span>
-          <span class="text-text2" style="font-size:18px">responses total</span>
-        </div>
-        <div class="mono text-[10px] tracking-widest text-text2 uppercase mb-3">Throughput · 7-Day Activity</div>
-        <canvas id="sparkline" width="600" height="100" style="width:100%;height:100px"></canvas>
+    <!-- ACTIVITY — sparkline (left) + live log (right) -->
+    <div class="grid gap-4" style="grid-template-columns:260px 1fr">
+
+      <!-- Left: 7-day sparkline -->
+      <div class="glass p-5 flex flex-col">
+        <div class="mono text-[10px] tracking-widest text-text2 uppercase mb-3">7-Day Activity</div>
+        <canvas id="sparkline" width="400" height="160" style="width:100%;height:160px;display:block"></canvas>
         <div class="mono text-[10px] text-mint mt-2" id="spark-peak-day"></div>
       </div>
+
+      <!-- Right: live activity log -->
+      <div class="glass p-5 flex flex-col" style="min-height:240px">
+        <div class="flex items-baseline justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Live Activity</span>
+          <span class="mono text-[10px] text-text2" id="activity-count">0 entries</span>
+        </div>
+        <div id="activity-feed" class="overflow-y-auto flex-1" style="max-height:480px">
+          <div class="text-text2 text-xs italic activity-init-msg">Connecting to event stream...</div>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
@@ -535,6 +536,10 @@ let d = {
   cron:{jobs:[]},
 };
 
+// Activity log accumulator — client-side, max 1000 entries, newest first
+let activityLog = [];
+let activitySeenIds = new Set();
+
 let directiveTimer=null, contextTimer=null, sparkTimer=null, integrityTimer=null;
 let currentTab='health', pipelineRendered=false, overviewRunning=false;
 
@@ -589,7 +594,7 @@ function pollOnce(){
 function mergeData(data){
   if(!data)return;
   if(data.agents)d.agents=data.agents;
-  if(data.activity)d.activity=data.activity;
+  if(data.activity){d.activity=data.activity;syncActivityFeed(data.activity);}
   if(data.activity_by_day)d.activity_by_day=data.activity_by_day;
   if(data.vps)d.vps=data.vps;
   if(data.stats)d.stats=data.stats;
@@ -600,7 +605,7 @@ function mergeData(data){
 }
 connectSSE(); pollOnce(); setInterval(pollOnce,POLL_INTERVAL);
 
-function renderOverview(){renderRadar();renderVPS();renderFooter();renderStats();renderSparkline();renderActivityFeed();renderIntegrity();renderCronJobs();}
+function renderOverview(){renderRadar();renderVPS();renderFooter();renderStats();renderSparkline();renderIntegrity();renderCronJobs();}
 
 function renderRadar(){
   const g=document.getElementById('radar-dots'); if(!g)return;
@@ -726,20 +731,57 @@ function renderSparkline(){
   const last=pts[pts.length-1];ctx.beginPath();ctx.arc(last.x,last.y,4,0,Math.PI*2);ctx.fillStyle='#00acc1';ctx.shadowColor='#00acc1';ctx.shadowBlur=12;ctx.fill();ctx.shadowBlur=0;
 }
 
-// ACTIVITY FEED — static scrollable, no auto-push
-function renderActivityFeed(){
-  const el=document.getElementById('activity-feed'); if(!el)return;
-  const acts=d.activity||[];
-  const ce=document.getElementById('activity-count'); if(ce)ce.textContent=acts.length+' entries';
-  if(!acts.length){el.innerHTML='<div class="text-text2 text-xs italic">No activity recorded yet. Activity will appear here when agents log tasks.</div>';return;}
-  el.innerHTML=acts.map(a=>{
-    const agent=a.agent_name||a.agent||'Unknown'; const task=a.task_description||a.task||'';
-    const status=a.status||'completed'; const created=a.created_at||'';
-    const color=AGENT_COLORS[agent]||'#00acc1';
-    const sc=status==='completed'||status==='active'?'#00e676':status==='failed'?'#ef4444':'#ffc107';
-    const rt=created?timeAgo(created):''; const st=task.length>50?task.substring(0,50)+'…':task;
-    return `<div class="flex items-center gap-2 py-1"><span class="mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style="background:${color}22;color:${color};border:1px solid ${color}33">${agent}</span><span class="text-[11px] text-text truncate flex-1">${st}</span><span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${sc}"></span><span class="mono text-[9px] text-text2 shrink-0">${rt}</span></div>`;
-  }).join('');
+// ACTIVITY FEED — accumulates up to 1000 entries, newest at top, slides in new rows
+function buildActivityRow(a, animate){
+  const agent=a.agent_name||a.agent||'Unknown';
+  const task=a.task_description||a.task||'';
+  const status=a.status||'completed';
+  const color=AGENT_COLORS[agent]||'#00acc1';
+  const sc=status==='completed'||status==='active'?'#00e676':status==='failed'?'#ef4444':'#ffc107';
+  const rt=a.created_at?timeAgo(a.created_at):'';
+  const st=task.length>85?task.substring(0,85)+'…':task;
+  const cls=animate?' slide-in-top':'';
+  return `<div class="flex items-center gap-2 py-1 border-b${cls}" style="border-color:rgba(30,34,48,.5)"><span class="mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style="background:${color}22;color:${color};border:1px solid ${color}33">${agent}</span><span class="text-[11px] text-text truncate flex-1">${st}</span><span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${sc}"></span><span class="mono text-[9px] text-text2 shrink-0 w-14 text-right">${rt}</span></div>`;
+}
+
+function syncActivityFeed(entries){
+  const el=document.getElementById('activity-feed'); if(!el||!entries||!entries.length)return;
+
+  // Identify entries not yet seen
+  const newOnes=entries.filter(a=>{
+    const key=String(a.id!=null?a.id:(a.agent_name+'|'+a.created_at));
+    return !activitySeenIds.has(key);
+  });
+  if(!newOnes.length)return;
+
+  // Register in seen set; add to log newest-first
+  newOnes.forEach(a=>activitySeenIds.add(String(a.id!=null?a.id:(a.agent_name+'|'+a.created_at))));
+  for(let i=newOnes.length-1;i>=0;i--)activityLog.unshift(newOnes[i]);
+
+  // Cap at 1000
+  if(activityLog.length>1000){
+    const dropped=activityLog.splice(1000);
+    dropped.forEach(a=>activitySeenIds.delete(String(a.id!=null?a.id:(a.agent_name+'|'+a.created_at))));
+  }
+
+  const isInit=!!el.querySelector('.activity-init-msg');
+
+  if(isInit){
+    // First render — full list, no animation
+    el.innerHTML=activityLog.map(a=>buildActivityRow(a,false)).join('');
+  } else {
+    // Incremental — prepend new rows with slide-in (process oldest-of-new first so newest lands at top)
+    for(let i=newOnes.length-1;i>=0;i--){
+      const tmp=document.createElement('div');
+      tmp.innerHTML=buildActivityRow(newOnes[i],true);
+      el.insertBefore(tmp.firstChild,el.firstChild);
+    }
+    // Trim DOM to 1000
+    while(el.children.length>1000)el.removeChild(el.lastChild);
+  }
+
+  const ce=document.getElementById('activity-count');
+  if(ce)ce.textContent=activityLog.length+(activityLog.length>=1000?' (max)':'')+' entries';
 }
 
 function timeAgo(isoStr){

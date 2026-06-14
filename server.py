@@ -200,7 +200,7 @@ def activity_data():
             }
 
         # Last 50 entries — sort by created_at DESC, id DESC
-        cur.execute("SELECT * FROM agent_logs ORDER BY created_at DESC, id DESC LIMIT 50")
+        cur.execute("SELECT * FROM agent_logs ORDER BY created_at DESC, id DESC LIMIT 200")
         recent = [dict(r) for r in cur.fetchall()]
 
         # Per-agent stats
