@@ -19,12 +19,13 @@ from datetime import datetime, timezone, timedelta
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(PROJECT_DIR, "index.html")
 BOARD_DB = os.path.join(PROJECT_DIR, "board.db")
+CVE_REPORTS_DIR = os.path.expanduser("~/Brain/cve-reports")
 AGENT_LOGS_DB = os.path.expanduser("~/.hermes/agent-logs.db")
 STATE_DB = os.path.expanduser("~/.hermes/state.db")
 GATEWAY_STATE_PATH = os.path.expanduser("~/.hermes/gateway_state.json")
 
-HOST = "127.0.0.1"
-PORT = 51763
+HOST = "0.0.0.0"
+PORT = 3333
 SSE_INTERVAL = 5  # seconds
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -353,6 +354,63 @@ def vps_health():
     return result
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CVE REPORTS — list + read markdown files from ~/Brain/cve-reports/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cve_reports_list():
+    """Return list of CVE report .md files with metadata."""
+    try:
+        if not os.path.isdir(CVE_REPORTS_DIR):
+            return {"ok": True, "reports": [], "dir": CVE_REPORTS_DIR}
+        reports = []
+        for fname in sorted(os.listdir(CVE_REPORTS_DIR), reverse=True):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(CVE_REPORTS_DIR, fname)
+            stat = os.stat(fpath)
+            # Extract CVE ID from filename (e.g. CVE-2026-41096-assessment.md)
+            cve_id = fname.replace("-assessment.md", "").replace("_", " ")
+            # Peek first few lines for title / CVSS
+            title = cve_id
+            cvss = None
+            try:
+                with open(fpath, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("# "):
+                            title = line[2:].strip()
+                            break
+            except Exception:
+                pass
+            reports.append({
+                "filename": fname,
+                "cve_id": cve_id,
+                "title": title,
+                "size_bytes": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+        return {"ok": True, "reports": reports, "count": len(reports)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "reports": []}
+
+
+def cve_report_read(filename):
+    """Return the raw markdown content of a single CVE report file."""
+    try:
+        # Sanitize: only allow .md files, no path traversal
+        if not filename.endswith(".md") or "/" in filename or "\\" in filename or ".." in filename:
+            return {"ok": False, "error": "Invalid filename"}
+        fpath = os.path.join(CVE_REPORTS_DIR, filename)
+        if not os.path.isfile(fpath):
+            return {"ok": False, "error": "File not found"}
+        with open(fpath, "r") as f:
+            content = f.read()
+        return {"ok": True, "filename": filename, "content": content}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def cron_jobs():
     """
     Parse /var/spool/cron/crontabs/*, /etc/crontab, /etc/cron.d/*.
@@ -584,6 +642,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_index()
         elif path == "/api/snapshot":
             self.serve_json(build_snapshot())
+        elif path == "/api/cve-reports":
+            self.serve_json(cve_reports_list())
+        elif path.startswith("/api/cve-report/"):
+            filename = path[len("/api/cve-report/"):]
+            self.serve_json(cve_report_read(filename))
         elif path == "/events":
             self.serve_sse()
         elif path == "/api/board":

@@ -62,6 +62,28 @@ table{width:100%;border-collapse:collapse}
 th{text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a8190;border-bottom:1px solid #1e2230}
 td{padding:10px 12px;border-bottom:1px solid rgba(30,34,48,.5);font-size:13px}
 tr:hover td{background:rgba(255,255,255,.015)}
+
+/* ── CVE Markdown Viewer ── */
+#cve-viewer h1{font-size:1.1rem;font-weight:700;color:#c8cdd8;margin:1.25rem 0 .75rem}
+#cve-viewer h2{font-size:.95rem;font-weight:600;color:#00acc1;margin:1rem 0 .5rem;padding-bottom:.35rem;border-bottom:1px solid #1e2230}
+#cve-viewer h3{font-size:.85rem;font-weight:600;color:#00acc1;margin:.75rem 0 .35rem}
+#cve-viewer h4{font-size:.8rem;font-weight:600;margin:.5rem 0 .25rem}
+#cve-viewer p{font-size:.8rem;color:#c8cdd8;margin-bottom:.6rem;line-height:1.5}
+#cve-viewer ul,#cve-viewer ol{margin-bottom:.75rem;padding-left:1.25rem}
+#cve-viewer li{font-size:.8rem;color:#c8cdd8;margin-bottom:.2rem;line-height:1.4}
+#cve-viewer ul{list-style-type:disc}
+#cve-viewer ol{list-style-type:decimal}
+#cve-viewer pre{background:#111318;border:1px solid #1e2230;border-radius:6px;padding:1rem;margin:.75rem 0;overflow-x:auto}
+#cve-viewer pre code{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#c8cdd8;background:none;padding:0}
+#cve-viewer code{font-family:'JetBrains Mono',monospace;font-size:.7rem;background:#181b22;padding:.15rem .4rem;border-radius:3px;color:#00acc1}
+#cve-viewer a{color:#00acc1;text-decoration:none}
+#cve-viewer a:hover{text-decoration:underline}
+#cve-viewer hr{border-color:#1e2230;margin:1rem 0}
+#cve-viewer table{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.75rem}
+#cve-viewer th{text-align:left;padding:.5rem .75rem;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;color:#7a8190;border-bottom:1px solid #1e2230;background:#111318}
+#cve-viewer td{padding:.5rem .75rem;border-bottom:1px solid rgba(30,34,48,.5);color:#c8cdd8}
+#cve-viewer tr:hover td{background:rgba(255,255,255,.015)}
+#cve-viewer blockquote{border-left:2px solid #00acc1;padding-left:.75rem;margin:.5rem 0;color:#7a8190;font-style:italic;font-size:.8rem}
 .progress-bar{height:4px;border-radius:2px;background:#1e2230;overflow:hidden}
 .progress-fill{height:100%;border-radius:2px;transition:width .5s ease}
 </style>
@@ -217,34 +239,32 @@ tr:hover td{background:rgba(255,255,255,.015)}
 
 <!-- TAB 5: CVE QUEUE & REPORTS -->
 <section id="view-cve" class="p-6 hidden">
-  <div class="max-w-6xl mx-auto">
-    <div class="mb-6">
-      <h1 class="text-lg font-semibold">CVE Queue & Reports</h1>
-      <p class="text-xs text-text2 mt-1">Vulnerability intelligence and on-demand research</p>
+  <div class="max-w-full mx-auto h-[calc(100vh-7rem)] flex flex-col">
+    <div class="mb-4 shrink-0">
+      <h1 class="text-lg font-semibold">CVE Intelligence Reports</h1>
+      <p class="text-xs text-text2 mt-1">Assessed vulnerability reports — select a report to view</p>
     </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div>
-        <h2 class="text-sm font-medium mb-3 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-cyan"></span>CVE Intelligence Queue</h2>
-        <div class="card overflow-hidden">
-          <table>
-            <thead><tr><th>CVE ID</th><th>Subsystem</th><th>Added</th><th>CVSS</th><th class="text-right">Actions</th></tr></thead>
-            <tbody id="cve-queue-body"></tbody>
-          </table>
+    <div class="flex gap-4 flex-1 min-h-0">
+      <!-- LEFT SIDEBAR: file list + search -->
+      <div class="w-72 shrink-0 flex flex-col gap-3">
+        <div class="relative">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="cve-search" type="text" placeholder="Search CVEs..." class="w-full rounded pl-8 pr-3 py-2 text-xs mono" oninput="filterCVEList(this.value)">
         </div>
+        <div id="cve-file-list" class="flex-1 overflow-y-auto space-y-1 min-h-0">
+          <div class="text-text2 italic text-xs text-center py-8">Loading reports...</div>
+        </div>
+        <div id="cve-list-count" class="text-[10px] text-text2 text-right shrink-0"></div>
       </div>
-      <div>
-        <h2 class="text-sm font-medium mb-3 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-violet"></span>On-Demand CVE Report</h2>
-        <div class="card p-5">
-          <div class="flex gap-3 mb-4">
-            <input id="cve-report-input" type="text" placeholder="CVE-2024-12345 or Apache Log4j 2.14.1" class="flex-1 rounded px-3 py-2.5 text-sm mono">
-            <button onclick="researchCVE()" class="btn-primary px-5 py-2.5 rounded text-sm font-medium whitespace-nowrap">Research</button>
-          </div>
-          <div id="cve-report-result" class="hidden"></div>
-          <div id="cve-report-loading" class="hidden">
-            <div class="skeleton h-4 w-3/4 rounded mb-3"></div>
-            <div class="skeleton h-4 w-1/2 rounded mb-3"></div>
-            <div class="skeleton h-4 w-2/3 rounded mb-3"></div>
-            <div class="skeleton h-4 w-1/3 rounded"></div>
+      <!-- RIGHT PANEL: markdown viewer -->
+      <div class="flex-1 min-w-0 card overflow-hidden flex flex-col">
+        <div id="cve-viewer-header" class="shrink-0 px-5 py-3 border-b border-border flex items-center justify-between">
+          <span id="cve-viewer-filename" class="text-sm font-medium text-text2">No report selected</span>
+          <span id="cve-viewer-meta" class="text-[10px] text-text2 mono"></span>
+        </div>
+        <div id="cve-viewer" class="flex-1 overflow-y-auto p-5">
+          <div class="flex items-center justify-center h-full text-text2 italic text-sm">
+            ← Select a report from the left panel
           </div>
         </div>
       </div>
@@ -665,108 +685,169 @@ function openAuditDrawer(idx) {
 }
 function closeAuditDrawer(){ document.getElementById('audit-drawer').classList.add('hidden'); }
 
-// ═══════════ TAB 5: CVE QUEUE & REPORTS ═══════════
+// ═══════════ TAB 5: CVE REPORTS ═══════════
+let cveReports = [];       // full list from /api/cve-reports
+let cveReportsFiltered = []; // filtered list for display
+let cveSearchTerm = "";
+
 function renderCVEQueue() {
-  const tbody = document.getElementById('cve-queue-body');
-  if(cveQueue.length===0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-text2 italic text-xs">CVE queue empty. Awaiting data from /api/cve-queue...</td></tr>';
+  // Fetch report list from backend
+  fetch(API_BASE + "/api/cve-reports")
+    .then(r => r.json())
+    .then(data => {
+      cveReports = (data && data.reports) ? data.reports : [];
+      cveReportsFiltered = cveReports;
+      renderCVEFileList();
+    })
+    .catch(() => {
+      document.getElementById("cve-file-list").innerHTML =
+        '<div class="text-text2 italic text-xs text-center py-8">Failed to load reports</div>';
+    });
+}
+
+function renderCVEFileList() {
+  const list = document.getElementById("cve-file-list");
+  const count = document.getElementById("cve-list-count");
+  const term = cveSearchTerm.toLowerCase();
+
+  cveReportsFiltered = cveReports.filter(r =>
+    !term ||
+    r.cve_id.toLowerCase().includes(term) ||
+    r.filename.toLowerCase().includes(term) ||
+    (r.title && r.title.toLowerCase().includes(term))
+  );
+
+  count.textContent = cveReportsFiltered.length + " / " + cveReports.length + " reports";
+
+  if (cveReportsFiltered.length === 0) {
+    list.innerHTML = '<div class="text-text2 italic text-xs text-center py-8">' +
+      (cveReports.length === 0 ? "No reports found in ~/Brain/cve-reports/" : "No matches") +
+      '</div>';
     return;
   }
-  tbody.innerHTML = cveQueue.map((c,i) => {
-    const cc = c.cvss>=9?'color:#d32f2f;font-weight:700':c.cvss>=7?'color:#ff6d00;font-weight:600':c.cvss>=4?'color:#ffc107':'color:#00acc1';
-    const pc = c.pocStatus==='available'?'color:#00e676':c.pocStatus==='in-progress'?'color:#ffc107':'color:#7a8190';
-    return `<tr>
-      <td class="mono text-xs font-medium text-cyan">${c.id}</td>
-      <td class="text-xs text-text2">${c.subsystem}</td>
-      <td class="text-xs text-text2">${c.dateAdded}</td>
-      <td class="mono text-xs" style="${cc}">${c.cvss}</td>
-      <td class="text-right">
-        <button onclick="sendToBreach(${i})" class="btn-primary px-2 py-1 rounded text-[10px] mr-1">Send to Breach</button>
-        <button onclick="deleteCVE(${i})" class="btn-danger px-2 py-1 rounded text-[10px]">Delete</button>
-      </td>
-    </tr>`;
-  }).join('');
-}
 
-function sendToBreach(idx) {
-  const cve = cveQueue[idx];
-  if(!cve) return;
-  if(API_BASE){ apiPost('/agents/breach/dispatch',{cveId:cve.id}); apiPost('/logbook/entry',{action:'CVE dispatched to Breach',cveId:cve.id}); }
-}
-
-function deleteCVE(idx) {
-  const cve = cveQueue[idx];
-  cveQueue.splice(idx,1);
-  renderCVEQueue();
-  if(API_BASE) apiDelete('/cve-queue/'+cve.id);
-}
-
-function researchCVE() {
-  const input = document.getElementById('cve-report-input').value.trim();
-  if(!input) return;
-  document.getElementById('cve-report-loading').classList.remove('hidden');
-  document.getElementById('cve-report-result').classList.add('hidden');
-  if(API_BASE) {
-    apiPost('/agents/researcher/cve-report',{query:input}).then(r=>{
-      document.getElementById('cve-report-loading').classList.add('hidden');
-      if(r) displayCVEReport(r);
-    });
-  } else {
-    setTimeout(()=>{
-      document.getElementById('cve-report-loading').classList.add('hidden');
-      displayCVEReport({
-        query: input,
-        summary: '[Demo] CVE report for ' + input + '. Connect API for live data.',
-        vulnerableVersions: '—', fixedVersions: '—',
-        references: ['https://nvd.nist.gov/vuln/detail/' + input],
-        fixSteps: ['Apply vendor patch', 'Verify mitigation'],
-        pocLinks: [], iocs: {ips:[], domains:[], urls:[], hashes:[], filenames:[]}
-      });
-    }, 2000);
-  }
-}
-
-function displayCVEReport(r) {
-  const result = document.getElementById('cve-report-result');
-  result.classList.remove('hidden');
-  result.innerHTML = `
-    <div class="space-y-4">
-      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Summary</div><div class="text-xs">${r.summary}</div></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Vulnerable</div><div class="mono text-[11px]">${r.vulnerableVersions||'—'}</div></div>
-        <div class="bg-surface2 rounded p-3"><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Fixed</div><div class="mono text-[11px]">${r.fixedVersions||'—'}</div></div>
-      </div>
-      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">Fix Steps</div><ul class="text-xs space-y-1">${(r.fixSteps||[]).map(s=>'<li class="flex items-start gap-2"><span class="text-cyan">→</span>'+s+'</li>').join('')}</ul></div>
-      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">References</div><div class="space-y-1">${(r.references||[]).map(u=>'<div class="mono text-[10px] text-cyan break-all">'+u+'</div>').join('')}</div></div>
-      <div><div class="text-[10px] text-text2 uppercase tracking-wider mb-1">IoCs</div>
-        <div class="grid grid-cols-2 gap-2 text-[10px]">
-          <div><span class="text-text2">IPs:</span> <span class="mono">${(r.iocs&&r.iocs.ips||[]).join(', ')||'—'}</span></div>
-          <div><span class="text-text2">Domains:</span> <span class="mono">${(r.iocs&&r.iocs.domains||[]).join(', ')||'—'}</span></div>
-          <div><span class="text-text2">Hashes:</span> <span class="mono">${(r.iocs&&r.iocs.hashes||[]).join(', ')||'—'}</span></div>
-          <div><span class="text-text2">Files:</span> <span class="mono">${(r.iocs&&r.iocs.filenames||[]).join(', ')||'—'}</span></div>
+  list.innerHTML = cveReportsFiltered.map((r, i) => {
+    const safeName = r.filename.replace(/'/g, "\\'");
+    const sizeKB = (r.size_bytes / 1024).toFixed(1);
+    const date = r.modified ? r.modified.substring(0, 10) : "—";
+    return `
+      <div onclick="openCVEReport('${safeName}')"
+           class="cursor-pointer rounded px-3 py-2.5 transition-colors hover:bg-surface2 group">
+        <div class="flex items-center justify-between mb-0.5">
+          <span class="mono text-xs font-medium text-cyan group-hover:text-cyan">${r.cve_id}</span>
+          <span class="text-[10px] text-text2 mono">${sizeKB} KB</span>
         </div>
-      </div>
-      <div class="flex gap-2 pt-2">
-        <button onclick="exportReport('json')" class="btn-ghost px-3 py-2 rounded text-xs">Export JSON</button>
-        <button onclick="exportReport('markdown')" class="btn-ghost px-3 py-2 rounded text-xs">Export Markdown</button>
-        <button onclick="sendReportToLogbook()" class="btn-primary px-3 py-2 rounded text-xs">Send to Logbook</button>
-      </div>
-    </div>`;
+        <div class="text-[11px] text-text2 truncate">${r.title}</div>
+        <div class="text-[10px] text-text2 mt-0.5">${date}</div>
+      </div>`;
+  }).join("");
 }
 
-function exportReport(fmt) {
-  const input = document.getElementById('cve-report-input').value.trim();
-  const data = { query: input, exportedAt: new Date().toISOString() };
-  const content = fmt==='json' ? JSON.stringify(data,null,2) : '# CVE Report: ' + input + '\n\n' + JSON.stringify(data,null,2);
-  const blob = new Blob([content], {type:fmt==='json'?'application/json':'text/markdown'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='cve-report.'+(fmt==='json'?'json':'md'); a.click();
-  URL.revokeObjectURL(url);
+function filterCVEList(term) {
+  cveSearchTerm = term.trim();
+  renderCVEFileList();
 }
 
-function sendReportToLogbook() {
-  const input = document.getElementById('cve-report-input').value.trim();
-  if(API_BASE) apiPost('/logbook/entry', {action:'CVE Report generated', query: input});
+function openCVEReport(filename) {
+  const viewer = document.getElementById("cve-viewer");
+  const headerName = document.getElementById("cve-viewer-filename");
+  const headerMeta = document.getElementById("cve-viewer-meta");
+
+  headerName.textContent = filename;
+  headerMeta.textContent = "Loading...";
+  viewer.innerHTML = '<div class="flex items-center justify-center h-full"><div class="skeleton h-4 w-3/4 rounded mb-3"></div></div>';
+
+  fetch(API_BASE + "/api/cve-report/" + encodeURIComponent(filename))
+    .then(r => r.json())
+    .then(data => {
+      if (!data || !data.ok) {
+        viewer.innerHTML = '<div class="text-red text-xs">Error: ' + (data && data.error ? data.error : "Failed to load") + '</div>';
+        headerMeta.textContent = "Error";
+        return;
+      }
+      const report = cveReports.find(r => r.filename === filename);
+      headerMeta.textContent = report ? (report.size_bytes / 1024).toFixed(1) + " KB · " + (report.modified ? report.modified.substring(0, 10) : "") : "";
+      viewer.innerHTML = renderMarkdown(data.content);
+    })
+    .catch(() => {
+      viewer.innerHTML = '<div class="text-red text-xs">Network error loading report</div>';
+      headerMeta.textContent = "Error";
+    });
+}
+
+// ─── Minimal Markdown Renderer ───────────────────────────────────────────────
+function renderMarkdown(md) {
+  if (!md) return "";
+  let html = md;
+
+  // Escape HTML first
+  html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    return '<pre class="mono text-[11px] bg-surface2 rounded p-4 mb-4 overflow-x-auto border border-border"><code>' +
+      code.trim() + '</code></pre>';
+  });
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="mono text-[11px] bg-surface2 px-1.5 py-0.5 rounded text-cyan">$1</code>');
+
+  // Tables
+  html = html.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, function(_, header, body) {
+    const headers = header.split("|").map(h => h.trim()).filter(h => h);
+    const rows = body.trim().split("\n").map(row =>
+      row.split("|").map(c => c.trim()).filter(c => c)
+    );
+    let table = '<table><thead><tr>';
+    headers.forEach(h => table += '<th>' + h + '</th>');
+    table += '</tr></thead><tbody>';
+    rows.forEach(row => {
+      table += '<tr>';
+      row.forEach(cell => table += '<td>' + cell + '</td>');
+      table += '</tr>';
+    });
+    table += '</tbody></table>';
+    return table;
+  });
+
+  // Headers
+  html = html.replace(/^######\s+(.+)$/gm, '<h6 class="text-[10px] font-semibold text-text2 uppercase tracking-wider mt-4 mb-2">$1</h6>');
+  html = html.replace(/^#####\s+(.+)$/gm, '<h5 class="text-xs font-semibold text-text2 uppercase tracking-wider mt-4 mb-2">$1</h5>');
+  html = html.replace(/^####\s+(.+)$/gm, '<h4 class="text-xs font-semibold mt-4 mb-2">$1</h4>');
+  html = html.replace(/^###\s+(.+)$/gm, '<h3 class="text-sm font-semibold text-cyan mt-5 mb-2">$1</h3>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h2 class="text-base font-semibold text-cyan mt-6 mb-3 pb-2 border-b border-border">$1</h2>');
+  html = html.replace(/^#\s+(.+)$/gm, '<h1 class="text-lg font-bold text-text mt-2 mb-4">$1</h1>');
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr class="border-border my-4">');
+
+  // Bold + italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-text">$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-cyan hover:underline">$1</a>');
+
+  // Unordered lists
+  html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li class="text-xs text-text ml-4 mb-1 list-disc list-inside">$1</li>');
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="mb-3">$1</ul>');
+
+  // Ordered lists
+  html = html.replace(/^\s*\d+\.\s+(.+)$/gm, '<li class="text-xs text-text ml-4 mb-1 list-decimal list-inside">$1</li>');
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote class="border-l-2 border-cyan pl-3 my-2 text-xs text-text2 italic">$1</blockquote>');
+
+  // Paragraphs — wrap remaining double-newline blocks
+  html = html.replace(/\n\n/g, '</p><p class="text-xs text-text mb-3">');
+  html = '<p class="text-xs text-text mb-3">' + html + '</p>';
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p[^>]*>\s*<\/p>/g, "");
+
+  return html;
 }
 
 // ═══════════ TAB 6: MORPHEUS ═══════════
