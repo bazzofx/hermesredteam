@@ -1,0 +1,5 @@
+[Morpheus] Mission Control running on http://0.0.0.0:3333
+[Morpheus] SSE stream:     http://0.0.0.0:3333/events
+[Morpheus] Snapshot API:   http://0.0.0.0:3333/api/snapshot
+[Morpheus] Task Board API: http://0.0.0.0:3333/api/board
+[Morpheus] Press Ctrl+C to stop.

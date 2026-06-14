@@ -26,7 +26,7 @@ GATEWAY_STATE_PATH = os.path.expanduser("~/.hermes/gateway_state.json")
 
 HOST = "0.0.0.0"
 PORT = 3333
-SSE_INTERVAL = 5  # seconds
+SSE_INTERVAL = 5  # seconds — matches dashboard poll expectation
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BOARD DB — init + helpers
@@ -560,27 +560,89 @@ def build_snapshot():
     try:
         gw = gateway_data()
         gw["uptime"] = gateway_uptime()
+        # Compute uptime_seconds from gateway uptime string or start_time
+        uptime_seconds = 0
+        try:
+            uptime_str = gw.get("uptime", "")
+            if isinstance(uptime_str, str) and uptime_str not in ("unknown", ""):
+                # Parse "Xh Ym" format
+                h_match = re.search(r'(\d+)h', uptime_str)
+                m_match = re.search(r'(\d+)m', uptime_str)
+                if h_match or m_match:
+                    hours = int(h_match.group(1)) if h_match else 0
+                    mins = int(m_match.group(1)) if m_match else 0
+                    uptime_seconds = hours * 3600 + mins * 60
+        except Exception:
+            pass
+        gw["uptime_seconds"] = uptime_seconds
         snapshot["gateway"] = gw
     except Exception as e:
-        snapshot["gateway"] = {"ok": False, "error": str(e)}
+        snapshot["gateway"] = {"ok": False, "error": str(e), "uptime_seconds": 0}
 
-    # Activity
+    # Activity — reshape to flat structure for JS
     try:
-        snapshot["activity"] = activity_data()
+        act = activity_data()
+        # d.activity = recent entries (list of objects with agent_name, task_description, status, created_at)
+        snapshot["activity"] = act.get("recent", [])
+        # d.agents = per-agent stats dict
+        snapshot["agents"] = act.get("agents", {})
+        # d.activity_by_day = daily breakdown
+        snapshot["activity_by_day"] = act.get("daily", [])
+        # d.stats = {total, completed, failed}
+        totals = act.get("totals", {})
+        snapshot["stats"] = {
+            "total": totals.get("total", 0),
+            "completed": totals.get("completed", 0),
+            "failed": totals.get("failed", 0),
+        }
     except Exception as e:
-        snapshot["activity"] = {"ok": False, "error": str(e)}
+        snapshot["activity"] = []
+        snapshot["agents"] = {}
+        snapshot["activity_by_day"] = []
+        snapshot["stats"] = {"total": 0, "completed": 0, "failed": 0}
 
-    # Sessions
+    # Sessions — reshape to {count, totals: {messages, input_tokens, cache_read_tokens}}
     try:
-        snapshot["sessions"] = sessions_data()
+        sess = sessions_data()
+        tokens = sess.get("tokens", {})
+        snapshot["sessions"] = {
+            "count": sess.get("session_count", 0),
+            "totals": {
+                "messages": sess.get("message_count", 0),
+                "input_tokens": tokens.get("input", 0),
+                "cache_read_tokens": tokens.get("cache", 0),
+            }
+        }
     except Exception as e:
-        snapshot["sessions"] = {"ok": False, "error": str(e)}
+        snapshot["sessions"] = {"count": 0, "totals": {"messages": 0, "input_tokens": 0, "cache_read_tokens": 0}}
 
-    # VPS Health
+    # VPS Health — add db_size_mb
     try:
-        snapshot["vps"] = vps_health()
+        vps = vps_health()
+        # Compute total DB size from known Hermes DBs
+        db_size_mb = 0
+        db_paths = [
+            os.path.expanduser("~/.hermes/agent-logs.db"),
+            os.path.expanduser("~/.hermes/state.db"),
+            os.path.join(PROJECT_DIR, "board.db"),
+        ]
+        for db_path in db_paths:
+            try:
+                if os.path.isfile(db_path):
+                    db_size_mb += os.path.getsize(db_path) / (1024 * 1024)
+            except Exception:
+                pass
+        vps["db_size_mb"] = round(db_size_mb, 1)
+        snapshot["vps"] = vps
     except Exception as e:
-        snapshot["vps"] = {"ok": False, "error": str(e)}
+        snapshot["vps"] = {"ok": False, "error": str(e), "db_size_mb": 0}
+
+    # Kanban — total task count
+    try:
+        tasks = board_list()
+        snapshot["kanban"] = {"total": len(tasks)}
+    except Exception as e:
+        snapshot["kanban"] = {"total": 0}
 
     # Cron Jobs
     try:

@@ -86,6 +86,25 @@ tr:hover td{background:rgba(255,255,255,.015)}
 #cve-viewer blockquote{border-left:2px solid #00acc1;padding-left:.75rem;margin:.5rem 0;color:#7a8190;font-style:italic;font-size:.8rem}
 .progress-bar{height:4px;border-radius:2px;background:#1e2230;overflow:hidden}
 .progress-fill{height:100%;border-radius:2px;transition:width .5s ease}
+
+/* ── OVERVIEW / GLASS SYSTEM ── */
+.glass{background:linear-gradient(135deg,rgba(17,23,24,.82),rgba(24,27,34,.65));backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.06);border-radius:10px}
+.glass-top-accent{position:relative}
+.glass-top-accent::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:10px 10px 0 0}
+@keyframes sweep-rotate{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.sweep-rotate{animation:sweep-rotate 4s linear infinite}
+@keyframes fade-cycle-in{0%{opacity:0;transform:translateY(6px)}15%{opacity:1;transform:translateY(0)}85%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-6px)}}
+.fade-cycle-in{animation:fade-cycle-in 2.6s ease-in-out}
+@keyframes pulse-segment{0%,100%{opacity:.55}50%{opacity:1;box-shadow:0 0 6px currentColor}}
+.pulse-segment{animation:pulse-segment 2.4s ease-in-out infinite}
+@keyframes bar-fill-in{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.bar-fill-in{animation:bar-fill-in .8s ease-out forwards;transform-origin:left}
+@keyframes slide-in-top{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.slide-in-top{animation:slide-in-top .3s ease-out}
+@keyframes jitter-up{0%,100%{transform:translateY(0)}50%{transform:translateY(-1px)}}
+.violet-glow{color:#c084fc;text-shadow:0 0 8px rgba(192,132,252,.4)}
+.gold{color:#fbbf24}
+.border-hair{border-color:rgba(255,255,255,.07)}
 </style>
 </head>
 <body class="min-h-screen bg-bg text-text">
@@ -106,8 +125,8 @@ tr:hover td{background:rgba(255,255,255,.015)}
     </div>
   </div>
   <div class="flex items-center gap-1">
-    <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-active px-3 py-2 text-xs font-medium transition-colors">Assault Pipeline</button>
-    <button onclick="switchTab('health')" id="tab-health" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">System Health</button>
+    <button onclick="switchTab('health')" id="tab-health" class="tab-active px-3 py-2 text-xs font-medium transition-colors">Overview</button>
+    <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Assault Pipeline</button>
     <button onclick="switchTab('subroutines')" id="tab-subroutines" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Subroutines</button>
     <button onclick="switchTab('audit')" id="tab-audit" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">Audit Logs</button>
     <button onclick="switchTab('cve')" id="tab-cve" class="tab-inactive px-3 py-2 text-xs font-medium transition-colors">CVE Queue</button>
@@ -151,14 +170,210 @@ tr:hover td{background:rgba(255,255,255,.015)}
   </div>
 </section>
 
-<!-- TAB 2: SYSTEM HEALTH -->
-<section id="view-health" class="p-6 hidden">
-  <div class="max-w-6xl mx-auto">
-    <div class="mb-6">
-      <h1 class="text-lg font-semibold">System Health</h1>
-      <p class="text-xs text-text2 mt-1">Real-time agent diagnostics</p>
+<!-- TAB 2: OVERVIEW (System Health) -->
+<section id="view-health" class="p-6">
+  <div class="max-w-7xl mx-auto space-y-4">
+
+    <!-- EYEBROW -->
+    <div class="flex items-center gap-3 px-1">
+      <div class="w-2 h-2 rounded-full bg-mint pulse-mint"></div>
+      <span class="mono text-[11px] tracking-widest font-medium" style="color:#00e676">UPLINK SYNCED</span>
+      <div class="h-3 w-px" style="background:rgba(255,255,255,.08)"></div>
+      <div class="h-3 w-px" style="background:rgba(255,255,255,.08)"></div>
+      <span class="mono text-[11px] text-text2 tracking-wide">Hermes Orchestrator</span>
+      <span class="mono text-[10px] text-text2 px-1.5 py-0.5 rounded" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)" id="ov-version">v1.0</span>
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="health-grid"></div>
+
+    <!-- LIVE OPS CONSOLE -->
+    <div class="glass p-5" id="ops-console">
+      <div class="flex gap-8" style="min-height:200px">
+
+        <!-- LEFT: Radar SVG -->
+        <div class="shrink-0" style="width:180px;height:180px;position:relative">
+          <svg width="180" height="180" viewBox="0 0 140 140" id="radar-svg">
+            <defs>
+              <radialGradient id="sweep-grad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#00acc1" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#00acc1" stop-opacity="0.02"/>
+              </radialGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="2" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <!-- concentric circles -->
+            <circle cx="70" cy="70" r="62" fill="none" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+            <circle cx="70" cy="70" r="46" fill="none" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+            <circle cx="70" cy="70" r="30" fill="none" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+            <circle cx="70" cy="70" r="14" fill="none" stroke="rgba(255,255,255,.05)" stroke-width=".5"/>
+            <!-- crosshairs -->
+            <line x1="8" y1="70" x2="132" y2="70" stroke="rgba(255,255,255,.04)" stroke-width=".5"/>
+            <line x1="70" y1="8" x2="70" y2="132" stroke="rgba(255,255,255,.04)" stroke-width=".5"/>
+            <!-- sweep group -->
+            <g class="sweep-rotate" style="transform-origin:70px 70px">
+              <line x1="70" y1="70" x2="70" y2="8" fill="none" stroke="#00acc1" stroke-width="1" filter="url(#glow)" opacity=".7"/>
+              <circle cx="70" cy="8" r="2" fill="#00acc1" filter="url(#glow)"/>
+              <path d="M70,70 L70,8 A62,62 0 0,1 128.3,39.2 Z" fill="url(#sweep-grad)"/>
+            </g>
+            <!-- agent dots rendered by JS -->
+            <g id="radar-dots"></g>
+          </svg>
+        </div>
+
+        <!-- CENTER: Directive + Context Window -->
+        <div class="flex-1 min-w-0 flex flex-col justify-between py-1">
+          <div>
+            <div class="mono text-[10px] tracking-widest text-text2 mb-2 uppercase">Current Directive</div>
+            <div id="directive-text" class="mono text-[15px]" style="color:#00acc1;min-height:60px">Connecting...</div>
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mb-1.5 mt-4">
+              <span class="mono text-[10px] tracking-widest text-text2 uppercase" id="context-agent-label">CONTEXT WINDOW</span>
+              <span class="mono text-[10px] text-text2" id="context-agent-count"></span>
+            </div>
+            <div id="context-segments" class="flex gap-[3px] mb-2" style="height:5px"></div>
+            <div class="mono text-[10px] text-text2 truncate" id="context-agent-status"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT: VPS Health -->
+        <div class="flex flex-col justify-between py-1" style="min-width:180px">
+          <div>
+            <div class="mono text-[10px] tracking-widest text-text2 mb-3 uppercase">VPS Health</div>
+            <div class="space-y-4">
+              <div>
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="mono text-[10px] text-text2">CPU</span>
+                  <span class="mono text-xs" style="color:#00acc1" id="vps-cpu-pct">—%</span>
+                </div>
+                <div class="rounded-full overflow-hidden" style="height:6px;background:rgba(255,255,255,.06)">
+                  <div id="vps-cpu-bar" class="h-full rounded-full bar-fill-in" style="width:0%;background:linear-gradient(90deg,#00acc1,#7c4df0)"></div>
+                </div>
+              </div>
+              <div>
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="mono text-[10px] text-text2">RAM</span>
+                  <span class="mono text-xs violet-glow" id="vps-ram-pct">—%</span>
+                </div>
+                <div class="rounded-full overflow-hidden" style="height:6px;background:rgba(255,255,255,.06)">
+                  <div id="vps-ram-bar" class="h-full rounded-full bar-fill-in" style="width:0%;background:linear-gradient(90deg,#7c4df0,#d946ef)"></div>
+                </div>
+                <div class="mono text-[9px] text-text2 text-right mt-1" id="vps-ram-sub">— / — MB</div>
+              </div>
+              <div>
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="mono text-[10px] text-text2">Disk</span>
+                  <span class="mono text-xs" style="color:#00e676" id="vps-disk-pct">—%</span>
+                </div>
+                <div class="rounded-full overflow-hidden" style="height:6px;background:rgba(255,255,255,.06)">
+                  <div id="vps-disk-bar" class="h-full rounded-full bar-fill-in" style="width:0%;background:linear-gradient(90deg,#00e676,#00acc1)"></div>
+                </div>
+                <div class="mono text-[9px] text-text2 text-right mt-1" id="vps-disk-sub">— / — GB</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="height:1px;background:rgba(255,255,255,.06);margin:12px 0"></div>
+            <div class="mono text-[10px] text-text2 mb-1">HERMES DBs</div>
+            <div class="mono text-sm gold" id="vps-db-size">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FOOTER: 5-cell stats -->
+      <div class="grid grid-cols-5 mt-5 pt-4" style="border-top:1px solid rgba(255,255,255,.06)">
+        <div class="text-center">
+          <div class="mono text-[18px] font-medium" id="foot-queue">0</div>
+          <div class="mono text-[9px] text-text2 mt-0.5">Queue</div>
+        </div>
+        <div class="text-center" style="border-left:1px solid rgba(255,255,255,.06)">
+          <div class="mono text-[18px] font-medium" id="foot-sessions">0</div>
+          <div class="mono text-[9px] text-text2 mt-0.5">Sessions</div>
+        </div>
+        <div class="text-center" style="border-left:1px solid rgba(255,255,255,.06)">
+          <div class="mono text-[18px] font-medium" id="foot-errors" style="color:#00e676">0</div>
+          <div class="mono text-[9px] text-text2 mt-0.5">Errors</div>
+        </div>
+        <div class="text-center" style="border-left:1px solid rgba(255,255,255,.06)">
+          <div class="mono text-[18px] font-medium" id="foot-today">0</div>
+          <div class="mono text-[9px] text-text2 mt-0.5">Today</div>
+        </div>
+        <div class="text-center" style="border-left:1px solid rgba(255,255,255,.06)">
+          <div class="mono text-[18px] font-medium" id="foot-uptime">0m</div>
+          <div class="mono text-[9px] text-text2 mt-0.5">Uptime</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS STRIP -->
+    <div class="grid grid-cols-5 gap-3">
+      <!-- Integrity -->
+      <div class="glass glass-top-accent p-4" style="--accent:#00e676">
+        <div class="flex items-center justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Integrity</span>
+          <div class="w-1.5 h-1.5 rounded-full bg-mint pulse-mint" id="stat-integrity-dot"></div>
+        </div>
+        <div class="flex items-baseline">
+          <span class="mono font-medium" style="font-size:clamp(24px,2.4vw,34px);color:#00e676" id="stat-integrity-int">—</span>
+          <span class="mono font-medium" style="font-size:clamp(24px,2.4vw,34px);color:#00e676" id="stat-integrity-dec">.—</span>
+        </div>
+        <div class="mono text-[10px] text-text2 mt-1"><span id="stat-integrity-resp">0</span> of 5 responsive</div>
+      </div>
+      <!-- Agent Calls -->
+      <div class="glass glass-top-accent p-4" style="--accent:#00acc1">
+        <div class="flex items-center justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Agent Calls</span>
+        </div>
+        <div class="mono font-medium" style="font-size:clamp(24px,2.4vw,34px);color:#00acc1" id="stat-calls">0</div>
+        <div class="mono text-[10px] text-text2 mt-1">total responses</div>
+      </div>
+      <!-- Messages -->
+      <div class="glass glass-top-accent p-4" style="--accent:#c084fc">
+        <div class="flex items-center justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Messages</span>
+        </div>
+        <div class="mono font-medium violet-glow" style="font-size:clamp(24px,2.4vw,34px)" id="stat-messages">0</div>
+        <div class="mono text-[10px] text-text2 mt-1">across all sessions</div>
+      </div>
+      <!-- Tokens In -->
+      <div class="glass glass-top-accent p-4" style="--accent:#fbbf24">
+        <div class="flex items-center justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Tokens In</span>
+        </div>
+        <div class="mono font-medium gold" style="font-size:clamp(24px,2.4vw,34px)" id="stat-tokens">0</div>
+        <div class="mono text-[10px] text-text2 mt-1">input tokens</div>
+      </div>
+      <!-- Cache Hits -->
+      <div class="glass glass-top-accent p-4" style="--accent:#f472b6">
+        <div class="flex items-center justify-between mb-3">
+          <span class="mono text-[10px] tracking-widest text-text2 uppercase">Cache Hits</span>
+        </div>
+        <div class="mono font-medium" style="font-size:clamp(24px,2.4vw,34px);color:#f472b6" id="stat-cache">0</div>
+        <div class="mono text-[10px] text-text2 mt-1">cache read tokens</div>
+      </div>
+    </div>
+
+    <!-- BOTTOM SECTION -->
+    <div class="grid gap-4" style="grid-template-columns:1.2fr 1fr">
+      <!-- Throughput -->
+      <div class="glass p-5">
+        <div class="flex items-baseline gap-3 mb-1">
+          <span class="mono font-bold" style="font-size:clamp(34px,4vw,56px);color:#00acc1" id="spark-total">0</span>
+          <span class="text-text2" style="font-size:18px">responses total</span>
+        </div>
+        <div class="mono text-[10px] tracking-widest text-text2 uppercase mb-3">Throughput · 7-Day Activity</div>
+        <canvas id="sparkline" width="600" height="100" style="width:100%;height:100px"></canvas>
+        <div class="mono text-[10px] text-mint mt-2" id="spark-peak-day"></div>
+      </div>
+      <!-- Activity Feed -->
+      <div class="glass p-5">
+        <div class="mono text-[10px] tracking-widest text-text2 uppercase mb-3">Activity</div>
+        <div id="activity-feed" class="space-y-1.5" style="max-height:160px;overflow:hidden">
+          <div class="text-text2 text-xs italic">Connecting to event stream...</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -351,24 +566,36 @@ tr:hover td{background:rgba(255,255,255,.015)}
 <script>
 // ═══════════ CONFIG ═══════════
 const API_BASE = '';
-const WS_URL = '';
+const SSE_URL = window.location.origin + '/events';
+const POLL_INTERVAL = 8000;
 
-// ═══════════ STATE ══════════=
-let currentTab = 'pipeline';
-let pipelineStatus = 'idle';
-let agents = [
-  { id:'recon', name:'Recon', icon:'◎', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
-  { id:'researcher', name:'Researcher', icon:'◉', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
-  { id:'breach', name:'Breach', icon:'◆', status:'offline', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
-  { id:'pivot', name:'Pivot', icon:'◇', status:'offline', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
-  { id:'logbook', name:'Logbook', icon:'▣', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' },
-  { id:'reportwriter', name:'ReportWriter', icon:'◈', status:'online', cpu:0, mem:0, uptime:'0m', lastHeartbeat:'—' }
-];
+// ═══════════ AGENT ACCENT COLORS ═══════════
+const AGENT_COLORS = {
+  'Orchestrator': '#A78BFA',
+  'Scout':       '#7DD3FC',
+  'Scribe':      '#F472B6',
+  'Reach':       '#E879F9',
+  'Dev':         '#A78BFA',
+};
 
-let subroutines = [];
-let auditLogs = [];
-let cveQueue = [];
-let morpheusHistory = [];
+// ═══════════ LIVE DATA STATE ═══════════
+let d = {
+  agents: {},
+  activity: [],
+  activity_by_day: [],
+  vps: {},
+  stats: { total: 0, completed: 0, failed: 0 },
+  sessions: { count: 0, totals: { messages: 0, input_tokens: 0, cache_read_tokens: 0 } },
+  kanban: { total: 0 },
+  gateway: { uptime_seconds: 0 },
+};
+
+// ═══════════ TIMERS ═══════════
+let directiveTimer = null;
+let contextTimer = null;
+let sparkTimer = null;
+let activityTimer = null;
+let integrityTimer = null;
 
 // ═══════════ CLOCK ═══════════
 function updateClock() {
@@ -381,48 +608,492 @@ updateClock();
 // ═══════════ TAB SWITCHING ═══════════
 function switchTab(tab) {
   currentTab = tab;
-  const tabs = ['pipeline','health','subroutines','audit','cve','morpheus'];
+  const tabs = ['health','pipeline','subroutines','audit','cve','morpheus'];
   tabs.forEach(t => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
     const btn = document.getElementById('tab-' + t);
     if(t === tab){ btn.classList.remove('tab-inactive'); btn.classList.add('tab-active'); }
     else { btn.classList.remove('tab-active'); btn.classList.add('tab-inactive'); }
   });
-  if(tab === 'health') renderHealth();
+  if(tab === 'health') startOverview();
+  else stopOverview();
+  if(tab === 'pipeline') { if(!pipelineRendered) { renderPipeline(); pipelineRendered = true; } }
   if(tab === 'subroutines') renderSubroutines();
   if(tab === 'audit') renderAudit();
   if(tab === 'cve') renderCVEQueue();
 }
 
-// ═══════════ API HELPERS ═══════════
-async function apiGet(path) {
-  if(!API_BASE) return null;
-  try { const r = await fetch(API_BASE + path); return await r.json(); } catch(e){ return null; }
+let pipelineRendered = false;
+
+let overviewRunning = false;
+function startOverview() {
+  if(overviewRunning) return;
+  overviewRunning = true;
+  // immediate render
+  renderOverview();
+  // start live loops
+  startDirectiveCycle();
+  startContextCycle();
+  startSparkline();
+  startActivityFeed();
+  startIntegrityJitter();
 }
-async function apiPost(path, body) {
-  if(!API_BASE) return null;
-  try { const r = await fetch(API_BASE + path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); return await r.json(); } catch(e){ return null; }
-}
-async function apiDelete(path) {
-  if(!API_BASE) return null;
-  try { await fetch(API_BASE + path, {method:'DELETE'}); return true; } catch(e){ return null; }
+function stopOverview() {
+  if(!overviewRunning) return;
+  overviewRunning = false;
+  if(directiveTimer) clearInterval(directiveTimer);
+  if(contextTimer) clearInterval(contextTimer);
+  if(sparkTimer) clearInterval(sparkTimer);
+  if(activityTimer) clearInterval(activityTimer);
+  if(integrityTimer) clearInterval(integrityTimer);
 }
 
-// ═══════════ WEBSOCKET PLACEHOLDER ═══════════
-function initWebSocket() {
-  if(!WS_URL) return;
+// ═══════════ DATA CONNECTION — SSE + POLLING FALLBACK ═══════════
+let sseConnected = false;
+
+function connectSSE() {
+  if(sseConnected) return;
   try {
-    const ws = new WebSocket(WS_URL);
-    ws.onmessage = (evt) => {
-      try { const data = JSON.parse(evt.data); handleWSMessage(data); } catch(e){}
+    const es = new EventSource(SSE_URL);
+    es.onopen = () => { sseConnected = true; };
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        mergeData(data);
+        renderOverview();
+      } catch(err) {}
     };
-    ws.onclose = () => setTimeout(initWebSocket, 5000);
-  } catch(e){}
+    es.onerror = () => {
+      sseConnected = false;
+      es.close();
+      // polling fallback kicks in via pollOnce
+    };
+  } catch(e) {}
 }
-function handleWSMessage(data) {
-  if(data.type === 'agent_status') updateAgentStatus(data.agent, data.status);
-  if(data.type === 'audit_log') auditLogs.unshift(data.log);
-  if(data.type === 'subroutine_update') updateSubroutine(data.subroutine);
+
+function pollOnce() {
+  if(sseConnected) return;
+  fetch(API_BASE + '/api/snapshot')
+    .then(r => r.json())
+    .then(data => {
+      mergeData(data);
+      renderOverview();
+    })
+    .catch(() => {});
+}
+
+function mergeData(data) {
+  if(!data) return;
+  if(data.agents) d.agents = data.agents;
+  if(data.activity) d.activity = data.activity;
+  if(data.activity_by_day) d.activity_by_day = data.activity_by_day;
+  if(data.vps) d.vps = data.vps;
+  if(data.stats) d.stats = data.stats;
+  if(data.sessions) d.sessions = data.sessions;
+  if(data.kanban) d.kanban = data.kanban;
+  if(data.gateway) d.gateway = data.gateway;
+}
+
+// Start data connection
+connectSSE();
+pollOnce(); // initial fetch
+setInterval(pollOnce, POLL_INTERVAL);
+
+// ═══════════ RENDER OVERVIEW ═══════════
+function renderOverview() {
+  renderRadar();
+  renderVPS();
+  renderFooter();
+  renderStats();
+  renderSparkline();
+  renderActivityFeed();
+  renderIntegrity();
+}
+
+// ═══════════ RADAR DOTS ═══════════
+function renderRadar() {
+  const g = document.getElementById('radar-dots');
+  if(!g) return;
+  const agents = d.agents || {};
+  const names = Object.keys(agents);
+  if(names.length === 0) { g.innerHTML = ''; return; }
+
+  const total = names.reduce((s, n) => s + (agents[n].total || 0), 0);
+  if(total === 0) { g.innerHTML = ''; return; }
+
+  let html = '';
+  names.forEach(name => {
+    const a = agents[name];
+    const share = (a.total || 0) / total;
+    // angle: spread evenly
+    const idx = names.indexOf(name);
+    const angle = (idx / names.length) * Math.PI * 2 - Math.PI/2;
+    // radius: share of max 58px (r=62 minus dot radius)
+    const r = 10 + share * 52;
+    const cx = 70 + Math.cos(angle) * r;
+    const cy = 70 + Math.sin(angle) * r;
+    const color = AGENT_COLORS[name] || '#00acc1';
+    const radius = 3 + share * 2.5;
+    html += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius.toFixed(1)}" fill="${color}" opacity=".9">
+      <animate attributeName="opacity" values=".6;1;.6" dur="${2 + idx * 0.3}s" repeatCount="indefinite"/>
+    </circle>`;
+  });
+  g.innerHTML = html;
+}
+
+// ═══════════ DIRECTIVE CYCLE ═══════════
+let directiveIdx = 0;
+function startDirectiveCycle() {
+  if(directiveTimer) clearInterval(directiveTimer);
+  directiveTimer = setInterval(() => {
+    const acts = d.activity || [];
+    if(acts.length === 0) return;
+    directiveIdx = (directiveIdx + 1) % acts.length;
+    const entry = acts[directiveIdx];
+    const el = document.getElementById('directive-text');
+    if(!el) return;
+    const agent = entry.agent_name || entry.agent || 'Unknown';
+    const task = entry.task_description || entry.task || '';
+    el.classList.remove('fade-cycle-in');
+    void el.offsetWidth; // reflow
+    el.textContent = agent + ' · ' + task;
+    el.classList.add('fade-cycle-in');
+  }, 2600);
+}
+
+// ═══════════ CONTEXT WINDOW CYCLE ═══════════
+let contextIdx = 0;
+function startContextCycle() {
+  if(contextTimer) clearInterval(contextTimer);
+  contextTimer = setInterval(() => {
+    const agents = d.agents || {};
+    const names = Object.keys(agents);
+    if(names.length === 0) return;
+    contextIdx = (contextIdx + 1) % names.length;
+    const name = names[contextIdx];
+    const a = agents[name];
+    const total = Object.values(agents).reduce((s, x) => s + (x.total || 0), 0);
+    const share = total > 0 ? (a.total || 0) / total : 0;
+    const color = AGENT_COLORS[name] || '#00acc1';
+
+    const labelEl = document.getElementById('context-agent-label');
+    if(labelEl) labelEl.textContent = name.toUpperCase();
+
+    const countEl = document.getElementById('context-agent-count');
+    if(countEl) countEl.textContent = (a.total || 0) + ' tasks';
+
+    const segEl = document.getElementById('context-segments');
+    if(segEl) {
+      let segs = '';
+      for(let i = 0; i < 16; i++) {
+        const filled = i < Math.round(share * 16);
+        const delay = i * 0.08;
+        if(filled) {
+          segs += `<div class="flex-1 pulse-segment bar-fill-in" style="height:5px;background:${color};opacity:.8;animation-delay:${delay}s;border-radius:1px"></div>`;
+        } else {
+          segs += `<div class="flex-1" style="height:5px;background:rgba(255,255,255,.04);border-radius:1px"></div>`;
+        }
+      }
+      segEl.innerHTML = segs;
+    }
+
+    const statusEl = document.getElementById('context-agent-status');
+    if(statusEl) {
+      const lastTask = a.last_task || '—';
+      statusEl.textContent = lastTask;
+    }
+  }, 2400);
+}
+
+// ═══════════ VPS HEALTH ═══════════
+function renderVPS() {
+  const vps = d.vps || {};
+  const cpu = vps.cpu_percent;
+  const ram = vps.ram || {};
+  const disk = vps.disk || {};
+
+  const cpuEl = document.getElementById('vps-cpu-pct');
+  const cpuBar = document.getElementById('vps-cpu-bar');
+  if(cpuEl && cpuBar && cpu != null) {
+    cpuEl.textContent = cpu.toFixed(1) + '%';
+    cpuBar.style.width = Math.min(cpu, 100) + '%';
+    cpuBar.style.background = cpu > 85 ? 'linear-gradient(90deg,#ef4444,#f97316)' : cpu > 70 ? 'linear-gradient(90deg,#f59e0b,#eab308)' : 'linear-gradient(90deg,#00acc1,#7c4df0)';
+  }
+
+  const ramEl = document.getElementById('vps-ram-pct');
+  const ramBar = document.getElementById('vps-ram-bar');
+  const ramSub = document.getElementById('vps-ram-sub');
+  if(ramEl && ramBar && ram.percent != null) {
+    ramEl.textContent = ram.percent.toFixed(1) + '%';
+    ramBar.style.width = Math.min(ram.percent, 100) + '%';
+    ramBar.style.background = ram.percent > 85 ? 'linear-gradient(90deg,#ef4444,#f97316)' : ram.percent > 70 ? 'linear-gradient(90deg,#f59e0b,#eab308)' : 'linear-gradient(90deg,#7c4df0,#d946ef)';
+    if(ramSub) ramSub.textContent = (ram.used_mb || 0) + ' / ' + (ram.total_mb || 0) + ' MB';
+  }
+
+  const diskEl = document.getElementById('vps-disk-pct');
+  const diskBar = document.getElementById('vps-disk-bar');
+  const diskSub = document.getElementById('vps-disk-sub');
+  if(diskEl && diskBar && disk.percent != null) {
+    diskEl.textContent = disk.percent.toFixed(1) + '%';
+    diskBar.style.width = Math.min(disk.percent, 100) + '%';
+    diskBar.style.background = disk.percent > 85 ? 'linear-gradient(90deg,#ef4444,#f97316)' : disk.percent > 70 ? 'linear-gradient(90deg,#f59e0b,#eab308)' : 'linear-gradient(90deg,#00e676,#00acc1)';
+    if(diskSub) diskSub.textContent = (disk.used_gb || 0) + ' / ' + (disk.total_gb || 0) + ' GB';
+  }
+
+  // DB size
+  const dbEl = document.getElementById('vps-db-size');
+  if(dbEl) {
+    const dbSize = vps.db_size_mb;
+    if(dbSize != null) {
+      dbEl.textContent = dbSize >= 1024 ? (dbSize/1024).toFixed(1) + ' GB' : dbSize.toFixed(0) + ' MB';
+    }
+  }
+}
+
+// ═══════════ FOOTER STATS ═══════════
+function renderFooter() {
+  const qEl = document.getElementById('foot-queue');
+  if(qEl) qEl.textContent = (d.kanban && d.kanban.total) || 0;
+
+  const sEl = document.getElementById('foot-sessions');
+  if(sEl) sEl.textContent = (d.sessions && d.sessions.count) || 0;
+
+  const eEl = document.getElementById('foot-errors');
+  if(eEl) {
+    const failed = (d.stats && d.stats.failed) || 0;
+    eEl.textContent = failed;
+    eEl.style.color = failed > 0 ? '#ef4444' : '#00e676';
+  }
+
+  const tEl = document.getElementById('foot-today');
+  if(tEl) {
+    const days = d.activity_by_day || [];
+    const last = days[days.length - 1];
+    tEl.textContent = last ? (last.count || last.total || 0) : 0;
+  }
+
+  const uEl = document.getElementById('foot-uptime');
+  if(uEl) {
+    const secs = (d.gateway && d.gateway.uptime_seconds) || 0;
+    if(secs > 0) {
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      uEl.textContent = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+    } else {
+      const uptime = d.gateway && d.gateway.uptime;
+      uEl.textContent = typeof uptime === 'string' ? uptime : '0m';
+    }
+  }
+}
+
+// ═══════════ STATS STRIP ═══════════
+function renderStats() {
+  const stats = d.stats || {};
+  const sessions = d.sessions || {};
+
+  const callsEl = document.getElementById('stat-calls');
+  if(callsEl) callsEl.textContent = fmtNum(stats.total || 0);
+
+  const msgEl = document.getElementById('stat-messages');
+  if(msgEl) msgEl.textContent = fmtNum((sessions.totals && sessions.totals.messages) || 0);
+
+  const tokEl = document.getElementById('stat-tokens');
+  if(tokEl) tokEl.textContent = fmtNum((sessions.totals && sessions.totals.input_tokens) || 0);
+
+  const cacheEl = document.getElementById('stat-cache');
+  if(cacheEl) cacheEl.textContent = fmtNum((sessions.totals && sessions.totals.cache_read_tokens) || 0);
+}
+
+function renderIntegrity() {
+  const stats = d.stats || {};
+  const total = stats.total || 0;
+  const completed = stats.completed || 0;
+  const rate = total > 0 ? (completed / total * 100) : 0;
+
+  const intEl = document.getElementById('stat-integrity-int');
+  const decEl = document.getElementById('stat-integrity-dec');
+  if(intEl) intEl.textContent = Math.floor(rate);
+  if(decEl) decEl.textContent = '.' + (rate % 1 * 100).toFixed(0).padStart(2, '0');
+
+  // Count responsive agents
+  const agents = d.agents || {};
+  const responsive = Object.values(agents).filter(a => (a.total || 0) > 0).length;
+  const respEl = document.getElementById('stat-integrity-resp');
+  if(respEl) respEl.textContent = responsive;
+}
+
+function startIntegrityJitter() {
+  if(integrityTimer) clearInterval(integrityTimer);
+  integrityTimer = setInterval(() => {
+    const stats = d.stats || {};
+    const total = stats.total || 0;
+    const completed = stats.completed || 0;
+    const rate = total > 0 ? (completed / total * 100) : 0;
+    const decEl = document.getElementById('stat-integrity-dec');
+    if(decEl) {
+      // jitter the decimal slightly
+      const jitter = (Math.random() * 4 - 2);
+      const jRate = Math.max(0, Math.min(100, rate + jitter));
+      decEl.textContent = '.' + (jRate % 1 * 100).toFixed(0).padStart(2, '0');
+    }
+  }, 1800);
+}
+
+function fmtNum(n) {
+  if(n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if(n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+// ═══════════ SPARKLINE ═══════════
+let sparkData = [];
+function startSparkline() {
+  if(sparkTimer) clearInterval(sparkTimer);
+  sparkTimer = setInterval(() => renderSparkline(), 900);
+}
+
+function renderSparkline() {
+  const canvas = document.getElementById('sparkline');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const days = d.activity_by_day || [];
+
+  // Update sparkData from live data
+  sparkData = days.map(d => d.count || d.total || 0);
+
+  // If no data, show empty
+  if(sparkData.length === 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  // Pad to at least 7 points
+  while(sparkData.length < 7) sparkData.unshift(0);
+
+  const total = sparkData.reduce((a, b) => a + b, 0);
+  const totalEl = document.getElementById('spark-total');
+  if(totalEl) totalEl.textContent = fmtNum(total);
+
+  // Peak day
+  const peakEl = document.getElementById('spark-peak-day');
+  if(peakEl && days.length > 0) {
+    let maxVal = 0, maxDay = '';
+    days.forEach(d => {
+      const v = d.count || d.total || 0;
+      if(v > maxVal) { maxVal = v; maxDay = d.day; }
+    });
+    peakEl.textContent = maxDay ? 'Peak: ' + maxDay + ' (' + maxVal + ' responses)' : '';
+  }
+
+  const W = canvas.width, H = canvas.height;
+  const pad = 8;
+  const maxVal = Math.max(...sparkData, 1);
+  const step = (W - pad * 2) / (sparkData.length - 1);
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Build points
+  const pts = sparkData.map((v, i) => ({
+    x: pad + i * step,
+    y: H - pad - (v / maxVal) * (H - pad * 2)
+  }));
+
+  // Filled area
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, '#7c4df0');
+  grad.addColorStop(1, '#00acc1');
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, H - pad);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(pts[pts.length-1].x, H - pad);
+  ctx.closePath();
+  const fillGrad = ctx.createLinearGradient(0, 0, 0, H);
+  fillGrad.addColorStop(0, 'rgba(124,77,240,.25)');
+  fillGrad.addColorStop(1, 'rgba(0,172,193,.02)');
+  ctx.fillStyle = fillGrad;
+  ctx.fill();
+
+  // Stroke line
+  ctx.beginPath();
+  pts.forEach((p, i) => { if(i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Glow dot at rightmost
+  const last = pts[pts.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#00acc1';
+  ctx.shadowColor = '#00acc1';
+  ctx.shadowBlur = 12;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+// ═══════════ ACTIVITY FEED ═══════════
+let feedEntries = [];
+function startActivityFeed() {
+  if(activityTimer) clearInterval(activityTimer);
+  activityTimer = setInterval(() => {
+    // Pick a new entry from d.activity
+    const acts = d.activity || [];
+    if(acts.length === 0) return;
+    // Find an entry not already in feed
+    const existing = new Set(feedEntries.map(e => e.id || e.created_at));
+    const fresh = acts.find(a => !existing.has(a.id || a.created_at));
+    if(fresh) {
+      feedEntries.unshift(fresh);
+      if(feedEntries.length > 8) feedEntries.pop();
+      renderActivityFeed();
+    }
+  }, 2200);
+}
+
+function renderActivityFeed() {
+  const el = document.getElementById('activity-feed');
+  if(!el) return;
+  const acts = d.activity || [];
+
+  if(acts.length === 0) {
+    el.innerHTML = '<div class="text-text2 text-xs italic">No activity yet...</div>';
+    return;
+  }
+
+  // Use feedEntries if populated, otherwise take first 8 from acts
+  const display = feedEntries.length > 0 ? feedEntries : acts.slice(0, 8);
+
+  el.innerHTML = display.map((a, i) => {
+    const agent = a.agent_name || a.agent || 'Unknown';
+    const task = a.task_description || a.task || '';
+    const status = a.status || 'completed';
+    const created = a.created_at || '';
+    const color = AGENT_COLORS[agent] || '#00acc1';
+    const statusColor = status === 'completed' || status === 'active' ? '#00e676' : '#ef4444';
+    const relTime = created ? timeAgo(created) : '';
+    const shortTask = task.length > 40 ? task.substring(0, 40) + '…' : task;
+
+    return `<div class="flex items-center gap-2 py-1 slide-in-top" style="animation-delay:${i * 0.05}s">
+      <span class="mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style="background:${color}22;color:${color};border:1px solid ${color}33">${agent}</span>
+      <span class="text-[11px] text-text truncate flex-1">${shortTask}</span>
+      <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></span>
+      <span class="mono text-[9px] text-text2 shrink-0">${relTime}</span>
+    </div>`;
+  }).join('');
+}
+
+function timeAgo(isoStr) {
+  if(!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if(diff < 60) return diff + 's ago';
+    if(diff < 3600) return Math.floor(diff/60) + 'm ago';
+    if(diff < 86400) return Math.floor(diff/3600) + 'h ago';
+    return Math.floor(diff/86400) + 'd ago';
+  } catch(e) { return ''; }
 }
 
 // ═══════════ TAB 1: ASSAULT PIPELINE ═══════════
@@ -890,10 +1561,11 @@ function clearMorpheusLog() {
 }
 
 // ═══════════ INITIALIZATION ═══════════
-renderPipeline();
-initWebSocket();
+let currentTab = 'health';
+// Overview auto-starts on load since it's the first tab
+setTimeout(() => { switchTab('health'); }, 100);
 
-// Simulate live heartbeat updates
+// Simulate live heartbeat updates for pipeline tab
 setInterval(()=>{
   agents.forEach(a=>{
     if(a.status!=='offline'){
@@ -902,7 +1574,6 @@ setInterval(()=>{
       a.lastHeartbeat = new Date().toISOString().substring(11,19) + ' UTC';
     }
   });
-  if(currentTab==='health') renderHealth();
 }, 5000);
 </script>
 </body>
